@@ -1,0 +1,14 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/shuru-cli",
+    "crates/shuru-vz",
+    "crates/shuru-guest",
+]
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true
