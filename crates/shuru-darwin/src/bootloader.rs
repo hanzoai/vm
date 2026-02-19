@@ -1,30 +1,26 @@
 use objc2::rc::{Id, Shared};
 use objc2::ClassType;
 
-use crate::sealed::UnsafeGetId;
 use crate::sys::foundation::{NSString, NSURL};
 use crate::sys::virtualization::{VZBootLoader, VZLinuxBootLoader};
-
-pub trait BootLoader: UnsafeGetId<VZBootLoader> {}
 
 pub struct LinuxBootLoader {
     inner: Id<VZLinuxBootLoader, Shared>,
 }
 
 impl LinuxBootLoader {
-    pub fn new(kernel_url: &str, initrd_url: &str, command_line: &str) -> Self {
-        let boot_loader = Self::new_with_kernel(kernel_url);
-        boot_loader.set_initrd(initrd_url);
+    pub fn new(kernel_path: &str, initrd_path: &str, command_line: &str) -> Self {
+        let boot_loader = Self::new_with_kernel(kernel_path);
+        boot_loader.set_initrd(initrd_path);
         boot_loader.set_command_line(command_line);
         boot_loader
     }
 
-    pub fn new_with_kernel(kernel_url: &str) -> Self {
+    pub fn new_with_kernel(kernel_path: &str) -> Self {
         unsafe {
-            let kernel_url = NSURL::file_url_with_path(kernel_url, false)
+            let kernel_url = NSURL::file_url_with_path(kernel_path, false)
                 .absolute_url()
                 .unwrap();
-
             LinuxBootLoader {
                 inner: VZLinuxBootLoader::initWithKernelURL(
                     VZLinuxBootLoader::alloc(),
@@ -34,12 +30,11 @@ impl LinuxBootLoader {
         }
     }
 
-    pub fn set_initrd(&self, initrd_url: &str) {
+    pub fn set_initrd(&self, initrd_path: &str) {
         unsafe {
-            let initrd_url = NSURL::file_url_with_path(initrd_url, false)
+            let initrd_url = NSURL::file_url_with_path(initrd_path, false)
                 .absolute_url()
                 .unwrap();
-
             self.inner.setInitialRamdiskURL(Some(&initrd_url));
         }
     }
@@ -50,12 +45,8 @@ impl LinuxBootLoader {
             self.inner.setCommandLine(&command_line);
         }
     }
-}
 
-impl BootLoader for LinuxBootLoader {}
-
-impl UnsafeGetId<VZBootLoader> for LinuxBootLoader {
-    fn id(&self) -> Id<VZBootLoader, Shared> {
+    pub(crate) fn as_vz_boot_loader(&self) -> Id<VZBootLoader, Shared> {
         unsafe { Id::cast(self.inner.clone()) }
     }
 }

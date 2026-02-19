@@ -1,4 +1,6 @@
 use std::ffi::c_void;
+use std::net::TcpStream;
+use std::os::unix::io::FromRawFd;
 
 use block2::ConcreteBlock;
 use crossbeam_channel::{bounded, Receiver, Sender};
@@ -7,17 +9,16 @@ use objc2::runtime::{NSObject, NSObjectProtocol, Object};
 use objc2::ClassType;
 use objc2::{declare_class, msg_send_id};
 
-use crate::sealed::UnsafeGetId;
+use crate::configuration::VirtualMachineConfiguration;
+use crate::error::{Result, VzError};
 use crate::sys::foundation::{NSError, NSKeyValueObservingOptions, NSString};
+use crate::sys::queue::{Queue, QueueAttribute};
 use crate::sys::virtualization::{
     VZVirtioSocketConnection, VZVirtioSocketDevice, VZVirtualMachine,
 };
 
-use crate::configuration::VirtualMachineConfiguration;
-use crate::sys::queue::{Queue, QueueAttribute};
-
-#[derive(Debug)]
-pub enum VirtualMachineState {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum VmState {
     Stopped = 0,
     Running = 1,
     Paused = 2,
@@ -34,23 +35,23 @@ pub enum VirtualMachineState {
 #[derive(Debug)]
 struct ObserverContext {
     machine: Id<VZVirtualMachine, Shared>,
-    notifier: Sender<VirtualMachineState>,
-    state_notifications: Receiver<VirtualMachineState>,
+    notifier: Sender<VmState>,
+    state_notifications: Receiver<VmState>,
 }
 
 impl ObserverContext {
-    fn state(&self) -> VirtualMachineState {
+    fn state(&self) -> VmState {
         unsafe {
             match self.machine.state() {
-                0 => VirtualMachineState::Stopped,
-                1 => VirtualMachineState::Running,
-                2 => VirtualMachineState::Paused,
-                3 => VirtualMachineState::Error,
-                4 => VirtualMachineState::Starting,
-                5 => VirtualMachineState::Pausing,
-                6 => VirtualMachineState::Resuming,
-                7 => VirtualMachineState::Stopping,
-                _ => VirtualMachineState::Unknown,
+                0 => VmState::Stopped,
+                1 => VmState::Running,
+                2 => VmState::Paused,
+                3 => VmState::Error,
+                4 => VmState::Starting,
+                5 => VmState::Pausing,
+                6 => VmState::Resuming,
+                7 => VmState::Stopping,
+                _ => VmState::Unknown,
             }
         }
     }
@@ -63,19 +64,13 @@ pub struct VirtualMachine {
     observer: Id<VirtualMachineStateObserver, Shared>,
 }
 
-/// VirtualMachine represents the entire state of a single virtual machine.
-///
-/// **Support**: macOS 11.0+
-///
-/// Creating a virtual machine using the Virtualization framework requires the app to have the "com.apple.security.virtualization" entitlement.
-/// see: <https://developer.apple.com/documentation/virtualization/vzvirtualmachine?language=objc>
 impl VirtualMachine {
     pub fn new(config: &VirtualMachineConfiguration) -> Self {
         unsafe {
             let queue = Queue::create("com.virt.fwk.rs", QueueAttribute::Serial);
             let machine = VZVirtualMachine::initWithConfiguration_queue(
                 VZVirtualMachine::alloc(),
-                &config.id(),
+                &config.inner,
                 queue.ptr,
             );
 
@@ -107,18 +102,15 @@ impl VirtualMachine {
         }
     }
 
-    /// Returns a crossbeam receiver channel for VM state changes.
-    pub fn get_state_channel(&self) -> Receiver<VirtualMachineState> {
+    pub fn state_channel(&self) -> Receiver<VmState> {
         self.ctx.state_notifications.clone()
     }
 
-    /// Returns whether the system supports virtualization.
     pub fn supported() -> bool {
         unsafe { VZVirtualMachine::isSupported() }
     }
 
-    /// Synchronously starts the VirtualMachine.
-    pub fn start(&self) -> Result<(), String> {
+    pub fn start(&self) -> Result<()> {
         unsafe {
             let (tx, rx) = std::sync::mpsc::channel();
             let dispatch_block = ConcreteBlock::new(move || {
@@ -128,7 +120,7 @@ impl VirtualMachine {
                         inner_tx.send(Ok(())).unwrap();
                     } else {
                         inner_tx
-                            .send(Err(err.as_mut().unwrap().localized_description()))
+                            .send(Err(VzError::from_ns_error(err.as_mut().unwrap())))
                             .unwrap();
                     }
                 });
@@ -140,20 +132,12 @@ impl VirtualMachine {
             let dispatch_block_clone = dispatch_block.clone();
             self.queue.exec_block_async(&dispatch_block_clone);
 
-            let result = rx.recv();
-
-            if result.is_err() {
-                return Err("TODO: implement better error handling here!".into());
-            }
-
-            result.unwrap()?;
-
-            Ok(())
+            rx.recv()
+                .map_err(|_| VzError::new("VM start channel closed"))?
         }
     }
 
-    /// Synchronously stops the VirtualMachine.
-    pub fn stop(&self) -> Result<(), String> {
+    pub fn stop(&self) -> Result<()> {
         let (tx, rx) = std::sync::mpsc::channel();
         let dispatch_block = ConcreteBlock::new(move || {
             let inner_tx = tx.clone();
@@ -163,7 +147,7 @@ impl VirtualMachine {
                         inner_tx.send(Ok(())).unwrap();
                     } else {
                         inner_tx
-                            .send(Err(err.as_mut().unwrap().localized_description()))
+                            .send(Err(VzError::from_ns_error(err.as_mut().unwrap())))
                             .unwrap();
                     }
                 });
@@ -176,15 +160,8 @@ impl VirtualMachine {
         let dispatch_block_clone = dispatch_block.clone();
         self.queue.exec_block_async(&dispatch_block_clone);
 
-        let result = rx.recv();
-
-        if result.is_err() {
-            return Err("TODO: implement better error handling here!".into());
-        }
-
-        result.unwrap()?;
-
-        Ok(())
+        rx.recv()
+            .map_err(|_| VzError::new("VM stop channel closed"))?
     }
 
     pub fn can_start(&self) -> bool {
@@ -212,30 +189,17 @@ impl VirtualMachine {
             .exec_sync(move || unsafe { self.ctx.machine.canRequestStop() })
     }
 
-    /// Returns the list of socket devices configured on this VM.
-    pub fn socket_devices(&self) -> Vec<Id<VZVirtioSocketDevice, Shared>> {
-        self.queue.exec_sync(move || unsafe {
-            let devices = self.ctx.machine.socketDevices();
-            let count = devices.count();
-            let mut result = Vec::with_capacity(count);
-            for i in 0..count {
-                let device = devices.object_at_index(i);
-                result.push(Id::cast(device));
-            }
-            result
-        })
-    }
-
-    /// Connects to a vsock port on the guest and returns the raw file descriptor.
+    /// Connects to a vsock port on the guest and returns a TcpStream.
     /// Must dispatch on the VM's queue per Apple Virtualization framework requirements.
-    pub fn connect_to_vsock_port(&self, port: u32) -> Result<i32, String> {
-        let (tx, rx) = std::sync::mpsc::channel::<Result<i32, String>>();
+    pub fn connect_to_vsock_port(&self, port: u32) -> Result<TcpStream> {
+        let (tx, rx) = std::sync::mpsc::channel::<Result<TcpStream>>();
 
         let dispatch_block = ConcreteBlock::new(move || {
             let devices = unsafe { self.ctx.machine.socketDevices() };
-            let count = unsafe { devices.count() };
+            let count = devices.count();
             if count == 0 {
-                tx.send(Err("No socket devices found on the VM".to_string())).ok();
+                tx.send(Err(VzError::new("No socket devices found on the VM")))
+                    .ok();
                 return;
             }
 
@@ -246,11 +210,11 @@ impl VirtualMachine {
             let completion_handler = ConcreteBlock::new(
                 move |conn: *mut VZVirtioSocketConnection, err: *mut NSError| {
                     if !err.is_null() {
-                        let msg = unsafe { (*err).localized_description() };
-                        inner_tx.send(Err(msg)).ok();
+                        let error = unsafe { VzError::from_ns_error(&*err) };
+                        inner_tx.send(Err(error)).ok();
                     } else if conn.is_null() {
                         inner_tx
-                            .send(Err("vsock connection returned null".to_string()))
+                            .send(Err(VzError::new("vsock connection returned null")))
                             .ok();
                     } else {
                         let fd = unsafe { (*conn).fileDescriptor() };
@@ -258,10 +222,11 @@ impl VirtualMachine {
                         let duped = unsafe { libc::dup(fd) };
                         if duped < 0 {
                             inner_tx
-                                .send(Err("failed to dup vsock fd".to_string()))
+                                .send(Err(VzError::new("failed to dup vsock fd")))
                                 .ok();
                         } else {
-                            inner_tx.send(Ok(duped)).ok();
+                            let stream = unsafe { TcpStream::from_raw_fd(duped) };
+                            inner_tx.send(Ok(stream)).ok();
                         }
                     }
                 },
@@ -277,11 +242,10 @@ impl VirtualMachine {
         self.queue.exec_block_async(&dispatch_block_clone);
 
         rx.recv()
-            .map_err(|_| "vsock connection channel closed".to_string())?
+            .map_err(|_| VzError::new("vsock connection channel closed"))?
     }
 
-    /// Returns the current execution state of the VM.
-    pub fn state(&self) -> VirtualMachineState {
+    pub fn state(&self) -> VmState {
         self.ctx.state()
     }
 }

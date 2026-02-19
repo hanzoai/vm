@@ -2,10 +2,7 @@
 name = "shuru-vz"
 version = "0.1.0"
 edition = "2021"
-description = "Virtualization.framework bindings for shuru (vendored from virt-fwk)"
+description = "Safe Virtualization.framework API for shuru"
 
 [dependencies]
-block2 = "=0.2.0-alpha.8"
-crossbeam-channel = "0.5"
-libc = "0.2"
-objc2 = "=0.3.0-beta.5"
+shuru-darwin = { path = "../shuru-darwin" }

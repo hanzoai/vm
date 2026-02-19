@@ -354,6 +354,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "shuru-darwin"
+version = "0.1.0"
+dependencies = [
+ "block2",
+ "crossbeam-channel",
+ "libc",
+ "objc2",
+]
+
+[[package]]
 name = "shuru-guest"
 version = "0.1.0"
 dependencies = [
@@ -366,10 +376,7 @@ dependencies = [
 name = "shuru-vz"
 version = "0.1.0"
 dependencies = [
- "block2",
- "crossbeam-channel",
- "libc",
- "objc2",
+ "shuru-darwin",
 ]
 
 [[package]]

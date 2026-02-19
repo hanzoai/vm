@@ -1,5 +1,6 @@
 use std::io::{BufRead, BufReader, Write};
-use std::os::unix::io::FromRawFd;
+use std::net::TcpStream;
+use std::os::fd::AsRawFd;
 use std::process;
 use std::time::Duration;
 
@@ -87,38 +88,41 @@ fn create_vm(
     boot_loader.set_command_line("console=hvc0 root=/dev/vda rw");
 
     let memory_bytes = memory_mb * 1024 * 1024;
-    let config = VirtualMachineConfiguration::new(boot_loader, cpus, memory_bytes);
+    let config = VirtualMachineConfiguration::new(&boot_loader, cpus, memory_bytes);
 
     // Serial console -> stdout for guest output, stdin for guest input
     eprintln!("shuru: configuring serial console...");
-    let serial_attachment =
-        FileHandleSerialPortAttachment::new(&std::io::stdin(), &std::io::stdout());
-    let serial = VirtioConsoleDeviceSerialPortConfiguration::new_with_attachment(serial_attachment);
-    config.set_serial_ports(vec![serial]);
+    let serial_attachment = FileHandleSerialPortAttachment::new(
+        std::io::stdin().as_raw_fd(),
+        std::io::stdout().as_raw_fd(),
+    );
+    let serial = VirtioConsoleDeviceSerialPortConfiguration::new_with_attachment(&serial_attachment);
+    config.set_serial_ports(&[serial]);
 
     // Rootfs disk
     eprintln!("shuru: configuring storage...");
-    let disk_attachment = DiskImageStorageDeviceAttachment::new(rootfs_path, false);
-    let block_device = VirtioBlockDeviceConfiguration::new(disk_attachment);
-    config.set_storage_devices(vec![block_device]);
+    let disk_attachment = DiskImageStorageDeviceAttachment::new(rootfs_path, false)
+        .map_err(|e| anyhow::anyhow!("Failed to create disk attachment: {}", e))?;
+    let block_device = VirtioBlockDeviceConfiguration::new(&disk_attachment);
+    config.set_storage_devices(&[block_device]);
 
     // NAT network
     eprintln!("shuru: configuring network...");
     let net_attachment = NATNetworkDeviceAttachment::new();
-    let net_device = VirtioNetworkDeviceConfiguration::new_with_attachment(net_attachment);
-    net_device.set_mac_address(MACAddress::new_with_random_locally_administered_address());
-    config.set_network_devices(vec![net_device]);
+    let net_device = VirtioNetworkDeviceConfiguration::new_with_attachment(&net_attachment);
+    net_device.set_mac_address(&MACAddress::random_local());
+    config.set_network_devices(&[net_device]);
 
     // vsock
     eprintln!("shuru: configuring vsock...");
     let socket_device = VirtioSocketDeviceConfiguration::new();
-    config.set_socket_devices(vec![socket_device]);
+    config.set_socket_devices(&[socket_device]);
 
     // Entropy
-    config.set_entropy_devices(vec![VirtioEntropyDeviceConfiguration::new()]);
+    config.set_entropy_devices(&[VirtioEntropyDeviceConfiguration::new()]);
 
     // Memory balloon
-    config.set_memory_balloon_devices(vec![
+    config.set_memory_balloon_devices(&[
         VirtioTraditionalMemoryBalloonDeviceConfiguration::new(),
     ]);
 
@@ -131,9 +135,7 @@ fn create_vm(
     Ok(VirtualMachine::new(&config))
 }
 
-fn exec_command(fd: i32, argv: Vec<String>) -> Result<i32> {
-    // SAFETY: fd is a valid socket from vsock connect
-    let stream = unsafe { std::net::TcpStream::from_raw_fd(fd) };
+fn exec_command(stream: TcpStream, argv: Vec<String>) -> Result<i32> {
     let mut writer = stream.try_clone()?;
     let reader = BufReader::new(stream);
 
@@ -235,7 +237,7 @@ fn main() -> Result<()> {
 
             let vm = create_vm(&kernel_path, &rootfs_path, initrd_opt, cpus, memory)?;
             eprintln!("shuru: VM created and validated successfully");
-            let state_rx = vm.get_state_channel();
+            let state_rx = vm.state_channel();
 
             eprintln!("shuru: starting VM...");
             vm.start()
@@ -264,11 +266,11 @@ fn main() -> Result<()> {
                 eprintln!("shuru: waiting for guest to be ready...");
                 std::thread::sleep(Duration::from_secs(3));
 
-                let mut fd = None;
+                let mut stream = None;
                 for attempt in 1..=10 {
                     match vm.connect_to_vsock_port(VSOCK_PORT) {
-                        Ok(f) => {
-                            fd = Some(f);
+                        Ok(s) => {
+                            stream = Some(s);
                             break;
                         }
                         Err(e) => {
@@ -281,10 +283,10 @@ fn main() -> Result<()> {
                     }
                 }
 
-                let fd = fd.unwrap();
+                let stream = stream.unwrap();
                 eprintln!("shuru: connected to guest, executing command...");
 
-                let exit_code = exec_command(fd, command)?;
+                let exit_code = exec_command(stream, command)?;
 
                 let _ = vm.stop();
                 process::exit(exit_code);
