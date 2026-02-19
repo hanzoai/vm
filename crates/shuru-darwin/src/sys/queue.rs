@@ -1,10 +1,7 @@
-use std::error::Error;
 use std::ffi::CString;
-use std::fmt;
 use std::mem;
 use std::os::raw::{c_char, c_void};
 use std::str;
-use std::time::Duration;
 
 use block2::Block;
 use objc2::{Encode, Encoding, RefEncode};
@@ -62,20 +59,6 @@ extern "C" {
 pub const DISPATCH_QUEUE_SERIAL: dispatch_queue_attr_t = 0 as dispatch_queue_attr_t;
 pub static DISPATCH_QUEUE_CONCURRENT: &dispatch_object_s =
     unsafe { &_dispatch_queue_attr_concurrent };
-
-/// An error indicating a wait timed out.
-#[derive(Clone, Debug)]
-pub struct WaitTimeout {
-    duration: Duration,
-}
-
-impl fmt::Display for WaitTimeout {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "Wait timed out after duration {:?}", self.duration)
-    }
-}
-
-impl Error for WaitTimeout {}
 
 fn context_and_function<F>(closure: F) -> (*mut c_void, dispatch_function_t)
 where

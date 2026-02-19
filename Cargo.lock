@@ -346,9 +346,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "clap",
- "serde",
- "serde_json",
- "shuru-vz",
+ "shuru-vm",
  "tracing",
  "tracing-subscriber",
 ]
@@ -373,10 +371,15 @@ dependencies = [
 ]
 
 [[package]]
-name = "shuru-vz"
+name = "shuru-vm"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
+ "crossbeam-channel",
+ "serde",
+ "serde_json",
  "shuru-darwin",
+ "tracing",
 ]
 
 [[package]]

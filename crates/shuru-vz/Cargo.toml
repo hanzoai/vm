@@ -1,8 +1,0 @@
-[package]
-name = "shuru-vz"
-version = "0.1.0"
-edition = "2021"
-description = "Safe Virtualization.framework API for shuru"
-
-[dependencies]
-shuru-darwin = { path = "../shuru-darwin" }

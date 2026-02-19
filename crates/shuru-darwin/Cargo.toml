@@ -4,6 +4,9 @@ version = "0.1.0"
 edition = "2021"
 description = "Unsafe Virtualization.framework bindings for shuru"
 
+[lints.rust]
+unexpected_cfgs = { level = "allow", check-cfg = ['cfg(feature, values("not_implemented_yet"))'] }
+
 [dependencies]
 block2 = "=0.2.0-alpha.8"
 crossbeam-channel = "0.5"

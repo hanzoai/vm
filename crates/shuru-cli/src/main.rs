@@ -1,16 +1,9 @@
-use std::io::{BufRead, BufReader, Write};
-use std::net::TcpStream;
-use std::os::fd::AsRawFd;
 use std::process;
-use std::time::Duration;
 
-use anyhow::{bail, Context, Result};
+use anyhow::{bail, Result};
 use clap::Parser;
-use serde::{Deserialize, Serialize};
 
-use shuru_vz::*;
-
-const VSOCK_PORT: u32 = 1024;
+use shuru_vm::{default_data_dir, Sandbox, VmState};
 
 #[derive(Parser)]
 #[command(name = "shuru", about = "microVM sandbox for AI agents")]
@@ -47,143 +40,6 @@ enum Commands {
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         command: Vec<String>,
     },
-}
-
-#[derive(Serialize)]
-struct ExecRequest {
-    argv: Vec<String>,
-    env: std::collections::HashMap<String, String>,
-}
-
-#[derive(Deserialize)]
-struct ExecResponse {
-    #[serde(rename = "type")]
-    msg_type: String,
-    data: Option<String>,
-    code: Option<i32>,
-}
-
-fn default_data_dir() -> String {
-    let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
-    format!("{}/.local/share/shuru", home)
-}
-
-fn create_vm(
-    kernel_path: &str,
-    rootfs_path: &str,
-    initrd_path: Option<&str>,
-    cpus: usize,
-    memory_mb: u64,
-) -> Result<VirtualMachine> {
-    if !VirtualMachine::supported() {
-        bail!("Virtualization is not supported on this machine");
-    }
-
-    eprintln!("shuru: configuring boot loader...");
-    let boot_loader = LinuxBootLoader::new_with_kernel(kernel_path);
-    if let Some(initrd) = initrd_path {
-        eprintln!("shuru: using initramfs: {}", initrd);
-        boot_loader.set_initrd(initrd);
-    }
-    boot_loader.set_command_line("console=hvc0 root=/dev/vda rw");
-
-    let memory_bytes = memory_mb * 1024 * 1024;
-    let config = VirtualMachineConfiguration::new(&boot_loader, cpus, memory_bytes);
-
-    // Serial console -> stdout for guest output, stdin for guest input
-    eprintln!("shuru: configuring serial console...");
-    let serial_attachment = FileHandleSerialPortAttachment::new(
-        std::io::stdin().as_raw_fd(),
-        std::io::stdout().as_raw_fd(),
-    );
-    let serial = VirtioConsoleDeviceSerialPortConfiguration::new_with_attachment(&serial_attachment);
-    config.set_serial_ports(&[serial]);
-
-    // Rootfs disk
-    eprintln!("shuru: configuring storage...");
-    let disk_attachment = DiskImageStorageDeviceAttachment::new(rootfs_path, false)
-        .map_err(|e| anyhow::anyhow!("Failed to create disk attachment: {}", e))?;
-    let block_device = VirtioBlockDeviceConfiguration::new(&disk_attachment);
-    config.set_storage_devices(&[block_device]);
-
-    // NAT network
-    eprintln!("shuru: configuring network...");
-    let net_attachment = NATNetworkDeviceAttachment::new();
-    let net_device = VirtioNetworkDeviceConfiguration::new_with_attachment(&net_attachment);
-    net_device.set_mac_address(&MACAddress::random_local());
-    config.set_network_devices(&[net_device]);
-
-    // vsock
-    eprintln!("shuru: configuring vsock...");
-    let socket_device = VirtioSocketDeviceConfiguration::new();
-    config.set_socket_devices(&[socket_device]);
-
-    // Entropy
-    config.set_entropy_devices(&[VirtioEntropyDeviceConfiguration::new()]);
-
-    // Memory balloon
-    config.set_memory_balloon_devices(&[
-        VirtioTraditionalMemoryBalloonDeviceConfiguration::new(),
-    ]);
-
-    eprintln!("shuru: validating configuration...");
-    config
-        .validate()
-        .map_err(|e| anyhow::anyhow!("VM configuration invalid: {}", e))?;
-
-    eprintln!("shuru: creating virtual machine...");
-    Ok(VirtualMachine::new(&config))
-}
-
-fn exec_command(stream: TcpStream, argv: Vec<String>) -> Result<i32> {
-    let mut writer = stream.try_clone()?;
-    let reader = BufReader::new(stream);
-
-    let req = ExecRequest {
-        argv,
-        env: std::collections::HashMap::new(),
-    };
-    writeln!(writer, "{}", serde_json::to_string(&req)?)?;
-    writer.flush()?;
-
-    let mut exit_code = 0;
-
-    for line in reader.lines() {
-        let line = line.context("reading vsock response")?;
-        if line.is_empty() {
-            continue;
-        }
-
-        let resp: ExecResponse =
-            serde_json::from_str(&line).context("parsing vsock response")?;
-
-        match resp.msg_type.as_str() {
-            "stdout" => {
-                if let Some(data) = &resp.data {
-                    print!("{}", data);
-                }
-            }
-            "stderr" => {
-                if let Some(data) = &resp.data {
-                    eprint!("{}", data);
-                }
-            }
-            "exit" => {
-                exit_code = resp.code.unwrap_or(0);
-                break;
-            }
-            "error" => {
-                if let Some(data) = &resp.data {
-                    eprintln!("shuru: guest error: {}", data);
-                }
-                exit_code = 1;
-                break;
-            }
-            _ => {}
-        }
-    }
-
-    Ok(exit_code)
 }
 
 fn main() -> Result<()> {
@@ -223,11 +79,13 @@ fn main() -> Result<()> {
                 );
             }
 
-            // Initrd is optional — if not present, boot without it
             let initrd_opt = if std::path::Path::new(&initrd_path).exists() {
                 Some(initrd_path.as_str())
             } else {
-                eprintln!("shuru: warning: initramfs not found at {}, booting without it", initrd_path);
+                eprintln!(
+                    "shuru: warning: initramfs not found at {}, booting without it",
+                    initrd_path
+                );
                 None
             };
 
@@ -235,25 +93,35 @@ fn main() -> Result<()> {
             eprintln!("shuru: rootfs={}", rootfs_path);
             eprintln!("shuru: booting VM ({}cpus, {}MB RAM)...", cpus, memory);
 
-            let vm = create_vm(&kernel_path, &rootfs_path, initrd_opt, cpus, memory)?;
+            let mut builder = Sandbox::builder()
+                .kernel(&kernel_path)
+                .rootfs(&rootfs_path)
+                .cpus(cpus)
+                .memory_mb(memory);
+
+            if let Some(initrd) = initrd_opt {
+                eprintln!("shuru: using initramfs: {}", initrd);
+                builder = builder.initrd(initrd);
+            }
+
+            let sandbox = builder.build()?;
             eprintln!("shuru: VM created and validated successfully");
-            let state_rx = vm.state_channel();
+
+            let state_rx = sandbox.state_channel();
 
             eprintln!("shuru: starting VM...");
-            vm.start()
-                .map_err(|e| anyhow::anyhow!("Failed to start VM: {}", e))?;
+            sandbox.start()?;
             eprintln!("shuru: VM started");
 
             if command.is_empty() {
-                // Console mode — serial output goes to stdout
                 eprintln!("shuru: running in console mode (Ctrl+C to stop)");
                 loop {
                     match state_rx.recv() {
-                        Ok(VirtualMachineState::Stopped) => {
+                        Ok(VmState::Stopped) => {
                             eprintln!("shuru: VM stopped");
                             break;
                         }
-                        Ok(VirtualMachineState::Error) => {
+                        Ok(VmState::Error) => {
                             eprintln!("shuru: VM encountered an error");
                             process::exit(1);
                         }
@@ -262,33 +130,12 @@ fn main() -> Result<()> {
                     }
                 }
             } else {
-                // Exec mode — connect via vsock and run command
                 eprintln!("shuru: waiting for guest to be ready...");
-                std::thread::sleep(Duration::from_secs(3));
 
-                let mut stream = None;
-                for attempt in 1..=10 {
-                    match vm.connect_to_vsock_port(VSOCK_PORT) {
-                        Ok(s) => {
-                            stream = Some(s);
-                            break;
-                        }
-                        Err(e) => {
-                            if attempt == 10 {
-                                bail!("Failed to connect to guest after 10 attempts: {}", e);
-                            }
-                            tracing::debug!("vsock connect attempt {} failed: {}", attempt, e);
-                            std::thread::sleep(Duration::from_secs(1));
-                        }
-                    }
-                }
+                let exit_code =
+                    sandbox.exec(&command, &mut std::io::stdout(), &mut std::io::stderr())?;
 
-                let stream = stream.unwrap();
-                eprintln!("shuru: connected to guest, executing command...");
-
-                let exit_code = exec_command(stream, command)?;
-
-                let _ = vm.stop();
+                let _ = sandbox.stop();
                 process::exit(exit_code);
             }
         }
