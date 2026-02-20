@@ -1,7 +1,9 @@
+#![forbid(unsafe_code)]
+
 mod proto;
 mod sandbox;
 
-pub use proto::{ExecRequest, ExecResponse};
+pub use proto::{ControlMessage, ExecRequest, ExecResponse};
 pub use sandbox::{Sandbox, VmConfigBuilder};
 
 // Re-exports from shuru-darwin for advanced/escape-hatch use

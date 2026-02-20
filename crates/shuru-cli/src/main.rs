@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+use std::io::IsTerminal;
 use std::process;
 
 use anyhow::{bail, Result};
@@ -104,6 +106,11 @@ fn main() -> Result<()> {
                 builder = builder.initrd(initrd);
             }
 
+            // Disable serial console stdin in exec/shell mode
+            if !command.is_empty() {
+                builder = builder.console(false);
+            }
+
             let sandbox = builder.build()?;
             eprintln!("shuru: VM created and validated successfully");
 
@@ -132,8 +139,11 @@ fn main() -> Result<()> {
             } else {
                 eprintln!("shuru: waiting for guest to be ready...");
 
-                let exit_code =
-                    sandbox.exec(&command, &mut std::io::stdout(), &mut std::io::stderr())?;
+                let exit_code = if std::io::stdin().is_terminal() {
+                    sandbox.shell(&command, &HashMap::new())?
+                } else {
+                    sandbox.exec(&command, &mut std::io::stdout(), &mut std::io::stderr())?
+                };
 
                 let _ = sandbox.stop();
                 process::exit(exit_code);

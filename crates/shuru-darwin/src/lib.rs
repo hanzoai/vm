@@ -9,6 +9,7 @@ mod network;
 mod serial;
 mod socket;
 mod storage;
+pub mod terminal;
 mod vm;
 
 pub use error::{VzError, Result};

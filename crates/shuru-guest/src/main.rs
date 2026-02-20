@@ -13,6 +13,19 @@ mod guest {
         pub argv: Vec<String>,
         #[serde(default)]
         pub env: std::collections::HashMap<String, String>,
+        #[serde(default)]
+        pub tty: bool,
+        #[serde(default = "default_rows")]
+        pub rows: u16,
+        #[serde(default = "default_cols")]
+        pub cols: u16,
+    }
+
+    fn default_rows() -> u16 {
+        24
+    }
+    fn default_cols() -> u16 {
+        80
     }
 
     #[derive(Serialize)]
@@ -25,20 +38,32 @@ mod guest {
         pub code: Option<i32>,
     }
 
-    fn mount_fs(source: &str, target: &str, fstype: &str) {
+    #[derive(Deserialize)]
+    #[serde(tag = "type")]
+    pub enum ControlMessage {
+        #[serde(rename = "stdin")]
+        Stdin { data: String },
+        #[serde(rename = "resize")]
+        Resize { rows: u16, cols: u16 },
+    }
+
+    fn mount_fs(source: &str, target: &str, fstype: &str, data: Option<&str>) {
         use std::ffi::CString;
 
         let c_source = CString::new(source).unwrap();
         let c_target = CString::new(target).unwrap();
         let c_fstype = CString::new(fstype).unwrap();
 
+        let data_ptr = data.map(|d| CString::new(d).unwrap());
         let ret = unsafe {
             libc::mount(
                 c_source.as_ptr(),
                 c_target.as_ptr(),
                 c_fstype.as_ptr(),
                 0,
-                std::ptr::null(),
+                data_ptr
+                    .as_ref()
+                    .map_or(std::ptr::null(), |d| d.as_ptr() as *const libc::c_void),
             )
         };
         if ret != 0 {
@@ -52,12 +77,12 @@ mod guest {
     }
 
     fn mount_filesystems() {
-        mount_fs("proc", "/proc", "proc");
-        mount_fs("sysfs", "/sys", "sysfs");
-        mount_fs("devtmpfs", "/dev", "devtmpfs");
+        mount_fs("proc", "/proc", "proc", None);
+        mount_fs("sysfs", "/sys", "sysfs", None);
+        mount_fs("devtmpfs", "/dev", "devtmpfs", None);
         std::fs::create_dir_all("/dev/pts").ok();
-        mount_fs("devpts", "/dev/pts", "devpts");
-        mount_fs("tmpfs", "/tmp", "tmpfs");
+        mount_fs("devpts", "/dev/pts", "devpts", Some("newinstance,ptmxmode=0666"));
+        mount_fs("tmpfs", "/tmp", "tmpfs", None);
     }
 
     fn setup_networking() {
@@ -156,6 +181,25 @@ mod guest {
         }
     }
 
+    fn send_response(fd: i32, resp: &ExecResponse) {
+        let json = serde_json::to_string(resp).unwrap();
+        let msg = format!("{}\n", json);
+        unsafe {
+            libc::write(fd, msg.as_ptr() as *const libc::c_void, msg.len());
+        }
+    }
+
+    fn send_error(fd: i32, msg: &str) {
+        send_response(
+            fd,
+            &ExecResponse {
+                msg_type: "error".into(),
+                data: Some(msg.into()),
+                code: None,
+            },
+        );
+    }
+
     fn handle_connection(fd: i32) {
         // SAFETY: fd is a valid socket from accept()
         let stream = unsafe { std::net::TcpStream::from_raw_fd(fd) };
@@ -195,66 +239,338 @@ mod guest {
                 continue;
             }
 
-            let mut cmd = Command::new(&req.argv[0]);
-            if req.argv.len() > 1 {
-                cmd.args(&req.argv[1..]);
+            if req.tty {
+                // TTY mode: hand off the raw fd, the line-based protocol is over
+                let raw_fd = std::os::unix::io::AsRawFd::as_raw_fd(&writer);
+                // Prevent TcpStream from closing the fd on drop
+                std::mem::forget(writer);
+                handle_tty_exec(raw_fd, &req);
+                return;
             }
-            for (k, v) in &req.env {
-                cmd.env(k, v);
-            }
-            cmd.stdout(Stdio::piped());
-            cmd.stderr(Stdio::piped());
 
-            match cmd.spawn() {
-                Ok(mut child) => {
-                    let mut stdout_data = String::new();
-                    let mut stderr_data = String::new();
+            // Non-TTY mode: piped exec (original behavior)
+            handle_piped_exec(&req, &mut writer);
+        }
+    }
 
-                    if let Some(mut stdout) = child.stdout.take() {
-                        let _ = stdout.read_to_string(&mut stdout_data);
-                    }
-                    if let Some(mut stderr) = child.stderr.take() {
-                        let _ = stderr.read_to_string(&mut stderr_data);
-                    }
+    fn handle_piped_exec(req: &ExecRequest, writer: &mut impl Write) {
+        let mut cmd = Command::new(&req.argv[0]);
+        if req.argv.len() > 1 {
+            cmd.args(&req.argv[1..]);
+        }
+        for (k, v) in &req.env {
+            cmd.env(k, v);
+        }
+        cmd.stdout(Stdio::piped());
+        cmd.stderr(Stdio::piped());
 
-                    let status = child.wait().expect("failed to wait on child");
-                    let exit_code = status.code().unwrap_or(-1);
+        match cmd.spawn() {
+            Ok(mut child) => {
+                let mut stdout_data = String::new();
+                let mut stderr_data = String::new();
 
-                    if !stdout_data.is_empty() {
-                        let resp = ExecResponse {
-                            msg_type: "stdout".into(),
-                            data: Some(stdout_data),
-                            code: None,
-                        };
-                        let _ = writeln!(writer, "{}", serde_json::to_string(&resp).unwrap());
-                    }
-
-                    if !stderr_data.is_empty() {
-                        let resp = ExecResponse {
-                            msg_type: "stderr".into(),
-                            data: Some(stderr_data),
-                            code: None,
-                        };
-                        let _ = writeln!(writer, "{}", serde_json::to_string(&resp).unwrap());
-                    }
-
-                    let resp = ExecResponse {
-                        msg_type: "exit".into(),
-                        data: None,
-                        code: Some(exit_code),
-                    };
-                    let _ = writeln!(writer, "{}", serde_json::to_string(&resp).unwrap());
+                if let Some(mut stdout) = child.stdout.take() {
+                    let _ = stdout.read_to_string(&mut stdout_data);
                 }
-                Err(e) => {
+                if let Some(mut stderr) = child.stderr.take() {
+                    let _ = stderr.read_to_string(&mut stderr_data);
+                }
+
+                let status = child.wait().expect("failed to wait on child");
+                let exit_code = status.code().unwrap_or(-1);
+
+                if !stdout_data.is_empty() {
                     let resp = ExecResponse {
-                        msg_type: "error".into(),
-                        data: Some(format!("failed to spawn: {}", e)),
+                        msg_type: "stdout".into(),
+                        data: Some(stdout_data),
                         code: None,
                     };
                     let _ = writeln!(writer, "{}", serde_json::to_string(&resp).unwrap());
                 }
+
+                if !stderr_data.is_empty() {
+                    let resp = ExecResponse {
+                        msg_type: "stderr".into(),
+                        data: Some(stderr_data),
+                        code: None,
+                    };
+                    let _ = writeln!(writer, "{}", serde_json::to_string(&resp).unwrap());
+                }
+
+                let resp = ExecResponse {
+                    msg_type: "exit".into(),
+                    data: None,
+                    code: Some(exit_code),
+                };
+                let _ = writeln!(writer, "{}", serde_json::to_string(&resp).unwrap());
+            }
+            Err(e) => {
+                let resp = ExecResponse {
+                    msg_type: "error".into(),
+                    data: Some(format!("failed to spawn: {}", e)),
+                    code: None,
+                };
+                let _ = writeln!(writer, "{}", serde_json::to_string(&resp).unwrap());
             }
         }
+    }
+
+    fn handle_tty_exec(vsock_fd: i32, req: &ExecRequest) {
+        use std::ffi::CString;
+
+        unsafe {
+            // Set up initial winsize
+            let ws = libc::winsize {
+                ws_row: req.rows,
+                ws_col: req.cols,
+                ws_xpixel: 0,
+                ws_ypixel: 0,
+            };
+
+            // Allocate PTY pair
+            let mut master: libc::c_int = 0;
+            let mut slave: libc::c_int = 0;
+            if libc::openpty(
+                &mut master,
+                &mut slave,
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                &ws as *const libc::winsize as *mut libc::winsize,
+            ) < 0
+            {
+                send_error(vsock_fd, "openpty failed");
+                libc::close(vsock_fd);
+                return;
+            }
+
+            let pid = libc::fork();
+            if pid < 0 {
+                send_error(vsock_fd, "fork failed");
+                libc::close(master);
+                libc::close(slave);
+                libc::close(vsock_fd);
+                return;
+            }
+
+            if pid == 0 {
+                // === CHILD ===
+                libc::close(master);
+                libc::close(vsock_fd);
+                libc::setsid();
+                libc::ioctl(slave, libc::TIOCSCTTY, 0);
+                libc::dup2(slave, 0);
+                libc::dup2(slave, 1);
+                libc::dup2(slave, 2);
+                if slave > 2 {
+                    libc::close(slave);
+                }
+
+                // Close any other inherited fds
+                for fd in 3..1024 {
+                    libc::close(fd);
+                }
+
+                // Set environment
+                for (k, v) in &req.env {
+                    if let Ok(var) = CString::new(format!("{}={}", k, v)) {
+                        libc::putenv(var.into_raw());
+                    }
+                }
+                if !req.env.contains_key("TERM") {
+                    let term = CString::new("TERM=xterm-256color").unwrap();
+                    libc::putenv(term.into_raw());
+                }
+                if !req.env.contains_key("PATH") {
+                    let path = CString::new(
+                        "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+                    )
+                    .unwrap();
+                    libc::putenv(path.into_raw());
+                }
+
+                // Build argv and exec
+                let c_args: Vec<CString> = req
+                    .argv
+                    .iter()
+                    .map(|s| CString::new(s.as_str()).unwrap_or_else(|_| CString::new("").unwrap()))
+                    .collect();
+                let c_argv: Vec<*const libc::c_char> = c_args
+                    .iter()
+                    .map(|s| s.as_ptr())
+                    .chain(std::iter::once(std::ptr::null()))
+                    .collect();
+
+                libc::execvp(c_argv[0], c_argv.as_ptr());
+
+                // If execvp returns, it failed
+                libc::_exit(127);
+            }
+
+            // === PARENT ===
+            libc::close(slave);
+            pty_poll_loop(vsock_fd, master, pid);
+            libc::close(master);
+            libc::close(vsock_fd);
+        }
+    }
+
+    fn pty_poll_loop(vsock_fd: i32, master_fd: i32, child_pid: libc::pid_t) {
+        let mut vsock_buf: Vec<u8> = Vec::new();
+        let mut read_buf = [0u8; 4096];
+
+        loop {
+            let mut fds = [
+                libc::pollfd {
+                    fd: vsock_fd,
+                    events: libc::POLLIN,
+                    revents: 0,
+                },
+                libc::pollfd {
+                    fd: master_fd,
+                    events: libc::POLLIN,
+                    revents: 0,
+                },
+            ];
+
+            let ret = unsafe { libc::poll(fds.as_mut_ptr(), 2, 200) };
+            if ret < 0 {
+                let err = std::io::Error::last_os_error();
+                if err.raw_os_error() == Some(libc::EINTR) {
+                    continue;
+                }
+                break;
+            }
+
+            // Check vsock for control messages (stdin, resize)
+            if fds[0].revents & libc::POLLIN != 0 {
+                let n = unsafe {
+                    libc::read(
+                        vsock_fd,
+                        read_buf.as_mut_ptr() as *mut libc::c_void,
+                        read_buf.len(),
+                    )
+                };
+                if n <= 0 {
+                    // Host disconnected — signal child and exit
+                    unsafe {
+                        libc::kill(child_pid, libc::SIGHUP);
+                    }
+                    break;
+                }
+                vsock_buf.extend_from_slice(&read_buf[..n as usize]);
+
+                // Process complete JSON lines
+                while let Some(pos) = vsock_buf.iter().position(|&b| b == b'\n') {
+                    let line: Vec<u8> = vsock_buf.drain(..=pos).collect();
+                    let line_str = String::from_utf8_lossy(&line);
+                    let line_str = line_str.trim();
+                    if line_str.is_empty() {
+                        continue;
+                    }
+
+                    if let Ok(msg) = serde_json::from_str::<ControlMessage>(line_str) {
+                        match msg {
+                            ControlMessage::Stdin { data } => {
+                                let bytes = data.as_bytes();
+                                unsafe {
+                                    libc::write(
+                                        master_fd,
+                                        bytes.as_ptr() as *const libc::c_void,
+                                        bytes.len(),
+                                    );
+                                }
+                            }
+                            ControlMessage::Resize { rows, cols } => unsafe {
+                                let ws = libc::winsize {
+                                    ws_row: rows,
+                                    ws_col: cols,
+                                    ws_xpixel: 0,
+                                    ws_ypixel: 0,
+                                };
+                                libc::ioctl(master_fd, libc::TIOCSWINSZ, &ws);
+                            },
+                        }
+                    }
+                }
+            }
+
+            if fds[0].revents & (libc::POLLHUP | libc::POLLERR) != 0 {
+                unsafe {
+                    libc::kill(child_pid, libc::SIGHUP);
+                }
+                break;
+            }
+
+            // Check PTY master for output
+            if fds[1].revents & libc::POLLIN != 0 {
+                let n = unsafe {
+                    libc::read(
+                        master_fd,
+                        read_buf.as_mut_ptr() as *mut libc::c_void,
+                        read_buf.len(),
+                    )
+                };
+                if n > 0 {
+                    let data = String::from_utf8_lossy(&read_buf[..n as usize]);
+                    send_response(
+                        vsock_fd,
+                        &ExecResponse {
+                            msg_type: "stdout".into(),
+                            data: Some(data.into_owned()),
+                            code: None,
+                        },
+                    );
+                }
+            }
+
+            if fds[1].revents & libc::POLLHUP != 0 {
+                // Child closed PTY — drain remaining output
+                loop {
+                    let n = unsafe {
+                        libc::read(
+                            master_fd,
+                            read_buf.as_mut_ptr() as *mut libc::c_void,
+                            read_buf.len(),
+                        )
+                    };
+                    if n <= 0 {
+                        break;
+                    }
+                    let data = String::from_utf8_lossy(&read_buf[..n as usize]);
+                    send_response(
+                        vsock_fd,
+                        &ExecResponse {
+                            msg_type: "stdout".into(),
+                            data: Some(data.into_owned()),
+                            code: None,
+                        },
+                    );
+                }
+                break;
+            }
+        }
+
+        // Wait for child and send exit code
+        let mut status: libc::c_int = 0;
+        unsafe {
+            libc::waitpid(child_pid, &mut status, 0);
+        }
+        let exit_code = if libc::WIFEXITED(status) {
+            libc::WEXITSTATUS(status)
+        } else if libc::WIFSIGNALED(status) {
+            128 + libc::WTERMSIG(status)
+        } else {
+            1
+        };
+
+        send_response(
+            vsock_fd,
+            &ExecResponse {
+                msg_type: "exit".into(),
+                data: None,
+                code: Some(exit_code),
+            },
+        );
     }
 
     extern "C" fn sigchld_handler(_: libc::c_int) {
