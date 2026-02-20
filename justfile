@@ -1,0 +1,44 @@
+guest_target := "aarch64-unknown-linux-musl"
+binary := "target/debug/shuru"
+
+# List available recipes
+default:
+    @just --list
+
+# Build the guest init binary (cross-compiled to aarch64 musl)
+build-guest:
+    cargo build -p shuru-guest --target {{ guest_target }} --release
+
+# Build the CLI binary (debug)
+build-cli:
+    cargo build -p shuru-cli
+
+# Codesign the CLI binary with virtualization entitlement
+codesign:
+    codesign --entitlements shuru.entitlements --force -s - {{ binary }}
+
+# Build everything: guest + CLI + codesign
+build: build-guest build-cli codesign
+
+# Prepare the rootfs, kernel, and initramfs (requires Docker)
+prepare-rootfs:
+    ./scripts/prepare-rootfs.sh
+
+# Run a command inside the VM
+run *args:
+    {{ binary }} run -- {{ args }}
+
+# Open an interactive shell in the VM
+shell:
+    {{ binary }} run -- sh
+
+# Full setup from scratch: rootfs + build
+setup: prepare-rootfs build
+
+# Check all crates compile (host targets only)
+check:
+    cargo check --workspace
+
+# Run clippy on all crates
+clippy:
+    cargo clippy --workspace

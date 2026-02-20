@@ -38,6 +38,10 @@ enum Commands {
         #[arg(long, env = "SHURU_INITRD")]
         initrd: Option<String>,
 
+        /// Allow network access (NAT)
+        #[arg(long)]
+        net: bool,
+
         /// Command and arguments to run inside the VM
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         command: Vec<String>,
@@ -61,6 +65,7 @@ fn main() -> Result<()> {
             kernel,
             rootfs,
             initrd,
+            net,
             command,
         } => {
             let data_dir = default_data_dir();
@@ -99,7 +104,8 @@ fn main() -> Result<()> {
                 .kernel(&kernel_path)
                 .rootfs(&rootfs_path)
                 .cpus(cpus)
-                .memory_mb(memory);
+                .memory_mb(memory)
+                .network(net);
 
             if let Some(initrd) = initrd_opt {
                 eprintln!("shuru: using initramfs: {}", initrd);

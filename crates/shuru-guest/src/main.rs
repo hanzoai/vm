@@ -85,6 +85,396 @@ mod guest {
         mount_fs("tmpfs", "/tmp", "tmpfs", None);
     }
 
+    fn bring_up_interface(sock: i32, name: &[u8]) {
+        unsafe {
+            let mut ifr: libc::ifreq = std::mem::zeroed();
+            let copy_len = name.len().min(libc::IFNAMSIZ);
+            std::ptr::copy_nonoverlapping(
+                name.as_ptr(),
+                ifr.ifr_name.as_mut_ptr() as *mut u8,
+                copy_len,
+            );
+
+            let display_name = String::from_utf8_lossy(&name[..name.len().saturating_sub(1)]);
+            if libc::ioctl(sock, libc::SIOCGIFFLAGS as _, &mut ifr) < 0 {
+                eprintln!("shuru-guest: failed to get {} flags", display_name);
+                return;
+            }
+
+            ifr.ifr_ifru.ifru_flags |= libc::IFF_UP as libc::c_short;
+            if libc::ioctl(sock, libc::SIOCSIFFLAGS as _, &ifr) < 0 {
+                eprintln!("shuru-guest: failed to bring up {}", display_name);
+            }
+        }
+    }
+
+    // --- Native DHCP client ---
+
+    const DHCP_SERVER_PORT: u16 = 67;
+    const DHCP_CLIENT_PORT: u16 = 68;
+    const DHCP_MAGIC: [u8; 4] = [99, 130, 83, 99];
+    const DHCP_DISCOVER: u8 = 1;
+    const DHCP_OFFER: u8 = 2;
+    const DHCP_REQUEST: u8 = 3;
+    const DHCP_ACK: u8 = 5;
+
+    struct DhcpLease {
+        ip: [u8; 4],
+        subnet: [u8; 4],
+        gateway: [u8; 4],
+        dns: [u8; 4],
+        server_id: [u8; 4],
+    }
+
+    fn make_sockaddr_in(ip: [u8; 4], port: u16) -> libc::sockaddr_in {
+        libc::sockaddr_in {
+            sin_family: libc::AF_INET as libc::sa_family_t,
+            sin_port: port.to_be(),
+            sin_addr: libc::in_addr {
+                s_addr: u32::from_ne_bytes(ip),
+            },
+            sin_zero: [0; 8],
+        }
+    }
+
+    fn get_mac_address(sock: i32) -> Option<[u8; 6]> {
+        unsafe {
+            let mut ifr: libc::ifreq = std::mem::zeroed();
+            std::ptr::copy_nonoverlapping(
+                b"eth0\0".as_ptr(),
+                ifr.ifr_name.as_mut_ptr() as *mut u8,
+                5,
+            );
+            if libc::ioctl(sock, libc::SIOCGIFHWADDR as _, &mut ifr) < 0 {
+                return None;
+            }
+            let mut mac = [0u8; 6];
+            std::ptr::copy_nonoverlapping(
+                ifr.ifr_ifru.ifru_hwaddr.sa_data.as_ptr() as *const u8,
+                mac.as_mut_ptr(),
+                6,
+            );
+            Some(mac)
+        }
+    }
+
+    fn build_dhcp_packet(
+        msg_type: u8,
+        xid: u32,
+        mac: &[u8; 6],
+        requested_ip: Option<[u8; 4]>,
+        server_id: Option<[u8; 4]>,
+    ) -> Vec<u8> {
+        let mut pkt = vec![0u8; 236];
+        pkt[0] = 1; // BOOTREQUEST
+        pkt[1] = 1; // Ethernet
+        pkt[2] = 6; // MAC length
+        pkt[4..8].copy_from_slice(&xid.to_be_bytes());
+        pkt[10] = 0x80; // Broadcast flag
+        pkt[28..34].copy_from_slice(mac);
+
+        // Magic cookie
+        pkt.extend_from_slice(&DHCP_MAGIC);
+        // Option 53: DHCP Message Type
+        pkt.extend_from_slice(&[53, 1, msg_type]);
+        // Option 55: Parameter Request List (subnet, router, DNS)
+        pkt.extend_from_slice(&[55, 3, 1, 3, 6]);
+
+        if let Some(ip) = requested_ip {
+            pkt.extend_from_slice(&[50, 4]); // Option 50: Requested IP
+            pkt.extend_from_slice(&ip);
+        }
+        if let Some(sid) = server_id {
+            pkt.extend_from_slice(&[54, 4]); // Option 54: Server Identifier
+            pkt.extend_from_slice(&sid);
+        }
+
+        pkt.push(255); // End
+        pkt
+    }
+
+    fn parse_dhcp_response(pkt: &[u8], expected_xid: u32) -> Option<(u8, DhcpLease)> {
+        if pkt.len() < 240 {
+            return None;
+        }
+        if pkt[0] != 2 {
+            return None; // Must be BOOTREPLY
+        }
+        let xid = u32::from_be_bytes([pkt[4], pkt[5], pkt[6], pkt[7]]);
+        if xid != expected_xid {
+            return None;
+        }
+        if pkt[236..240] != DHCP_MAGIC {
+            return None;
+        }
+
+        let ip = [pkt[16], pkt[17], pkt[18], pkt[19]]; // yiaddr
+        let mut msg_type = 0u8;
+        let mut subnet = [255, 255, 255, 0];
+        let mut gateway = [0u8; 4];
+        let mut dns = [8, 8, 8, 8]; // fallback
+        let mut server_id = [0u8; 4];
+
+        let mut i = 240;
+        while i < pkt.len() {
+            let opt = pkt[i];
+            if opt == 255 {
+                break;
+            }
+            if opt == 0 {
+                i += 1;
+                continue;
+            }
+            if i + 1 >= pkt.len() {
+                break;
+            }
+            let len = pkt[i + 1] as usize;
+            if i + 2 + len > pkt.len() {
+                break;
+            }
+            match opt {
+                53 if len >= 1 => msg_type = pkt[i + 2],
+                1 if len >= 4 => subnet.copy_from_slice(&pkt[i + 2..i + 6]),
+                3 if len >= 4 => gateway.copy_from_slice(&pkt[i + 2..i + 6]),
+                6 if len >= 4 => dns.copy_from_slice(&pkt[i + 2..i + 6]),
+                54 if len >= 4 => server_id.copy_from_slice(&pkt[i + 2..i + 6]),
+                _ => {}
+            }
+            i += 2 + len;
+        }
+
+        Some((
+            msg_type,
+            DhcpLease {
+                ip,
+                subnet,
+                gateway,
+                dns,
+                server_id,
+            },
+        ))
+    }
+
+    fn dhcp_request(mac: &[u8; 6]) -> Option<DhcpLease> {
+        unsafe {
+            let sock = libc::socket(libc::AF_INET, libc::SOCK_DGRAM, libc::IPPROTO_UDP);
+            if sock < 0 {
+                return None;
+            }
+
+            let one: libc::c_int = 1;
+            libc::setsockopt(
+                sock,
+                libc::SOL_SOCKET,
+                libc::SO_BROADCAST,
+                &one as *const _ as *const libc::c_void,
+                std::mem::size_of::<libc::c_int>() as libc::socklen_t,
+            );
+
+            // Bind to eth0 so DHCP goes through the right interface
+            libc::setsockopt(
+                sock,
+                libc::SOL_SOCKET,
+                libc::SO_BINDTODEVICE,
+                b"eth0\0".as_ptr() as *const libc::c_void,
+                5,
+            );
+
+            let tv = libc::timeval {
+                tv_sec: 5,
+                tv_usec: 0,
+            };
+            libc::setsockopt(
+                sock,
+                libc::SOL_SOCKET,
+                libc::SO_RCVTIMEO,
+                &tv as *const _ as *const libc::c_void,
+                std::mem::size_of::<libc::timeval>() as libc::socklen_t,
+            );
+
+            let bind_addr = make_sockaddr_in([0, 0, 0, 0], DHCP_CLIENT_PORT);
+            if libc::bind(
+                sock,
+                &bind_addr as *const _ as *const libc::sockaddr,
+                std::mem::size_of::<libc::sockaddr_in>() as libc::socklen_t,
+            ) < 0
+            {
+                eprintln!(
+                    "shuru-guest: DHCP bind failed: {}",
+                    std::io::Error::last_os_error()
+                );
+                libc::close(sock);
+                return None;
+            }
+
+            let broadcast = make_sockaddr_in([255, 255, 255, 255], DHCP_SERVER_PORT);
+            let xid = libc::getpid() as u32;
+
+            // DHCPDISCOVER
+            let discover = build_dhcp_packet(DHCP_DISCOVER, xid, mac, None, None);
+            if libc::sendto(
+                sock,
+                discover.as_ptr() as *const libc::c_void,
+                discover.len(),
+                0,
+                &broadcast as *const _ as *const libc::sockaddr,
+                std::mem::size_of::<libc::sockaddr_in>() as libc::socklen_t,
+            ) < 0
+            {
+                libc::close(sock);
+                return None;
+            }
+
+            // Receive DHCPOFFER
+            let mut buf = [0u8; 1500];
+            let n = libc::recv(sock, buf.as_mut_ptr() as *mut libc::c_void, buf.len(), 0);
+            if n <= 0 {
+                eprintln!("shuru-guest: DHCP no offer received");
+                libc::close(sock);
+                return None;
+            }
+
+            let (msg_type, offer) = match parse_dhcp_response(&buf[..n as usize], xid) {
+                Some(v) => v,
+                None => {
+                    libc::close(sock);
+                    return None;
+                }
+            };
+            if msg_type != DHCP_OFFER {
+                libc::close(sock);
+                return None;
+            }
+
+            // DHCPREQUEST
+            let request =
+                build_dhcp_packet(DHCP_REQUEST, xid, mac, Some(offer.ip), Some(offer.server_id));
+            libc::sendto(
+                sock,
+                request.as_ptr() as *const libc::c_void,
+                request.len(),
+                0,
+                &broadcast as *const _ as *const libc::sockaddr,
+                std::mem::size_of::<libc::sockaddr_in>() as libc::socklen_t,
+            );
+
+            // Receive DHCPACK
+            let n = libc::recv(sock, buf.as_mut_ptr() as *mut libc::c_void, buf.len(), 0);
+            libc::close(sock);
+            if n <= 0 {
+                return None;
+            }
+
+            let (msg_type, ack) = parse_dhcp_response(&buf[..n as usize], xid)?;
+            if msg_type == DHCP_ACK {
+                Some(ack)
+            } else {
+                None
+            }
+        }
+    }
+
+    // --- Interface configuration via ioctl ---
+
+    fn set_interface_addr(sock: i32, ip: [u8; 4], mask: [u8; 4]) {
+        unsafe {
+            let mut ifr: libc::ifreq = std::mem::zeroed();
+            std::ptr::copy_nonoverlapping(
+                b"eth0\0".as_ptr(),
+                ifr.ifr_name.as_mut_ptr() as *mut u8,
+                5,
+            );
+
+            // Set IP address
+            let addr = make_sockaddr_in(ip, 0);
+            std::ptr::copy_nonoverlapping(
+                &addr as *const _ as *const u8,
+                &mut ifr.ifr_ifru as *mut _ as *mut u8,
+                std::mem::size_of::<libc::sockaddr_in>(),
+            );
+            if libc::ioctl(sock, libc::SIOCSIFADDR as _, &ifr) < 0 {
+                eprintln!(
+                    "shuru-guest: failed to set IP: {}",
+                    std::io::Error::last_os_error()
+                );
+            }
+
+            // Set subnet mask
+            let mask_addr = make_sockaddr_in(mask, 0);
+            std::ptr::copy_nonoverlapping(
+                &mask_addr as *const _ as *const u8,
+                &mut ifr.ifr_ifru as *mut _ as *mut u8,
+                std::mem::size_of::<libc::sockaddr_in>(),
+            );
+            if libc::ioctl(sock, libc::SIOCSIFNETMASK as _, &ifr) < 0 {
+                eprintln!(
+                    "shuru-guest: failed to set netmask: {}",
+                    std::io::Error::last_os_error()
+                );
+            }
+        }
+    }
+
+    // Linux rtentry for SIOCADDRT (not in libc crate)
+    #[repr(C)]
+    struct RtEntry {
+        rt_pad1: libc::c_ulong,
+        rt_dst: libc::sockaddr,
+        rt_gateway: libc::sockaddr,
+        rt_genmask: libc::sockaddr,
+        rt_flags: libc::c_ushort,
+        rt_pad2: libc::c_short,
+        rt_pad3: libc::c_ulong,
+        rt_pad4: *mut libc::c_void,
+        rt_metric: libc::c_short,
+        rt_dev: *mut libc::c_char,
+        rt_mtu: libc::c_ulong,
+        rt_window: libc::c_ulong,
+        rt_irtt: libc::c_ushort,
+    }
+
+    fn add_default_route(sock: i32, gateway: [u8; 4]) {
+        unsafe {
+            let mut rt: RtEntry = std::mem::zeroed();
+
+            let dst = make_sockaddr_in([0, 0, 0, 0], 0);
+            std::ptr::copy_nonoverlapping(
+                &dst as *const _ as *const u8,
+                &mut rt.rt_dst as *mut _ as *mut u8,
+                std::mem::size_of::<libc::sockaddr>(),
+            );
+
+            let gw = make_sockaddr_in(gateway, 0);
+            std::ptr::copy_nonoverlapping(
+                &gw as *const _ as *const u8,
+                &mut rt.rt_gateway as *mut _ as *mut u8,
+                std::mem::size_of::<libc::sockaddr>(),
+            );
+
+            let mask = make_sockaddr_in([0, 0, 0, 0], 0);
+            std::ptr::copy_nonoverlapping(
+                &mask as *const _ as *const u8,
+                &mut rt.rt_genmask as *mut _ as *mut u8,
+                std::mem::size_of::<libc::sockaddr>(),
+            );
+
+            rt.rt_flags = libc::RTF_UP | libc::RTF_GATEWAY;
+
+            if libc::ioctl(sock, libc::SIOCADDRT as _, &rt) < 0 {
+                eprintln!(
+                    "shuru-guest: failed to add default route: {}",
+                    std::io::Error::last_os_error()
+                );
+            }
+        }
+    }
+
+    fn fmt_ip(ip: [u8; 4]) -> String {
+        format!("{}.{}.{}.{}", ip[0], ip[1], ip[2], ip[3])
+    }
+
+    // --- Main networking setup ---
+
     fn setup_networking() {
         unsafe {
             let sock = libc::socket(libc::AF_INET, libc::SOCK_DGRAM, 0);
@@ -93,25 +483,53 @@ mod guest {
                 return;
             }
 
-            let mut ifr: libc::ifreq = std::mem::zeroed();
-            let ifname = b"lo\0";
-            std::ptr::copy_nonoverlapping(
-                ifname.as_ptr(),
-                ifr.ifr_name.as_mut_ptr() as *mut u8,
-                3,
-            );
+            bring_up_interface(sock, b"lo\0");
 
-            // Get current flags
-            if libc::ioctl(sock, libc::SIOCGIFFLAGS as _, &mut ifr) < 0 {
-                eprintln!("shuru-guest: failed to get lo flags");
+            // Check if eth0 exists (network device present)
+            let has_eth0 = {
+                let mut ifr: libc::ifreq = std::mem::zeroed();
+                std::ptr::copy_nonoverlapping(
+                    b"eth0\0".as_ptr(),
+                    ifr.ifr_name.as_mut_ptr() as *mut u8,
+                    5,
+                );
+                libc::ioctl(sock, libc::SIOCGIFFLAGS as _, &mut ifr) == 0
+            };
+
+            if !has_eth0 {
                 libc::close(sock);
+                eprintln!("shuru-guest: no network device (sandbox mode)");
                 return;
             }
 
-            // Set IFF_UP
-            ifr.ifr_ifru.ifru_flags |= libc::IFF_UP as libc::c_short;
-            if libc::ioctl(sock, libc::SIOCSIFFLAGS as _, &ifr) < 0 {
-                eprintln!("shuru-guest: failed to bring up lo");
+            bring_up_interface(sock, b"eth0\0");
+
+            let mac = match get_mac_address(sock) {
+                Some(m) => m,
+                None => {
+                    eprintln!("shuru-guest: failed to get MAC address");
+                    libc::close(sock);
+                    return;
+                }
+            };
+
+            match dhcp_request(&mac) {
+                Some(lease) => {
+                    set_interface_addr(sock, lease.ip, lease.subnet);
+                    add_default_route(sock, lease.gateway);
+
+                    let dns_conf = format!("nameserver {}\n", fmt_ip(lease.dns));
+                    let _ = std::fs::write("/etc/resolv.conf", dns_conf);
+
+                    eprintln!(
+                        "shuru-guest: network configured: ip={} gw={}",
+                        fmt_ip(lease.ip),
+                        fmt_ip(lease.gateway)
+                    );
+                }
+                None => {
+                    eprintln!("shuru-guest: DHCP failed, no network");
+                }
             }
 
             libc::close(sock);

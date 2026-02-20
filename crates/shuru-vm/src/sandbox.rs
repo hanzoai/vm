@@ -24,6 +24,7 @@ pub struct VmConfigBuilder {
     cpus: usize,
     memory_mb: u64,
     console: bool,
+    network: bool,
 }
 
 impl VmConfigBuilder {
@@ -35,6 +36,7 @@ impl VmConfigBuilder {
             cpus: 2,
             memory_mb: 2048,
             console: true,
+            network: false,
         }
     }
 
@@ -71,6 +73,12 @@ impl VmConfigBuilder {
         self
     }
 
+    /// Enable network access (NAT). Disabled by default for sandboxing.
+    pub fn network(mut self, enabled: bool) -> Self {
+        self.network = enabled;
+        self
+    }
+
     pub fn build(self) -> Result<Sandbox> {
         let kernel_path = self.kernel.context("kernel path is required")?;
         let rootfs_path = self.rootfs.context("rootfs path is required")?;
@@ -104,10 +112,12 @@ impl VmConfigBuilder {
         let block_device = VirtioBlockDevice::new(&disk_attachment);
         config.set_storage_devices(&[block_device]);
 
-        let net_attachment = NATNetworkAttachment::new();
-        let net_device = VirtioNetworkDevice::new_with_attachment(&net_attachment);
-        net_device.set_mac_address(&MACAddress::random_local());
-        config.set_network_devices(&[net_device]);
+        if self.network {
+            let net_attachment = NATNetworkAttachment::new();
+            let net_device = VirtioNetworkDevice::new_with_attachment(&net_attachment);
+            net_device.set_mac_address(&MACAddress::random_local());
+            config.set_network_devices(&[net_device]);
+        }
 
         let socket_device = VirtioSocketDevice::new();
         config.set_socket_devices(&[socket_device]);
