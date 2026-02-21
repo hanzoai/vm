@@ -93,7 +93,7 @@
           </div>
 
           <div class="cli-panel p-5 font-mono text-xs leading-[1.8] md:p-6 md:text-sm" data-hash="checkpoints">
-            <p><span class="text-dim">$</span> <span class="text-text">shuru checkpoint create myenv -- sh -c 'apk add nodejs npm'</span></p>
+          <p><span class="text-dim">$</span> <span class="text-text">shuru checkpoint create myenv --allow-net -- sh -c 'apk add nodejs npm'</span></p>
             <p class="text-amber">shuru: checkpoint 'myenv' saved</p>
             <br />
             <p><span class="text-dim">$</span> <span class="text-text">shuru run --from myenv -- node -e 'console.log("ready")'</span></p>
