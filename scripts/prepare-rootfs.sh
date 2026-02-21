@@ -169,7 +169,7 @@ DHCPEOF
             cp /usr/sbin/resize2fs /initramfs/sbin/resize2fs
             mkdir -p /initramfs/lib
             cp /lib/ld-musl-aarch64.so.1 /initramfs/lib/
-            for lib in $(ldd /usr/sbin/resize2fs | grep -o '\''/lib/[^ ]*'\''); do
+            for lib in $(ldd /usr/sbin/resize2fs | awk '\''/=>/{print $3}'\''); do
                 cp "$lib" /initramfs/lib/
             done
 
