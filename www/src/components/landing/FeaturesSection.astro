@@ -1,0 +1,63 @@
+---
+const features = [
+  {
+    id: "01",
+    title: "Ephemeral by Default",
+    description:
+      "Every run starts from a clean rootfs. Install anything, break anything. Nothing persists unless you save it.",
+    image: "/images/card-ephemeral.svg",
+    alt: "Ephemeral container dissolving",
+  },
+  {
+    id: "02",
+    title: "Checkpoints",
+    description:
+      "Save disk state as named snapshots. Restore, branch, and iterate. Like git commits for your environment.",
+    image: "/images/card-checkpoints.svg",
+    alt: "Git DAG branching checkpoint tree",
+  },
+  {
+    id: "03",
+    title: "Apple Silicon Native",
+    description:
+      "Built on Virtualization.framework. No emulation layer, no Docker dependency. Near-native speed on ARM64.",
+    image: "/images/card-native.svg",
+    alt: "Apple Silicon chip with lightning bolt",
+  },
+];
+---
+
+<section class="relative border-x border-border">
+  <span class="section-label">Features</span>
+
+  <div class="border-b border-dashed border-border px-8 pt-16 pb-0 md:px-16 md:pt-24">
+    <h2 class="text-2xl font-semibold tracking-tight md:text-4xl lg:text-5xl">
+      Fast, Ephemeral, Stateful.
+      <br />
+      <span class="text-muted">Infrastructure for AI Agents.</span>
+    </h2>
+
+    <div class="mt-12 grid border border-border md:grid-cols-3">
+      {
+        features.map((feature, index) => (
+          <div class:list={[
+            "flex flex-col p-6 md:p-8",
+            index < features.length - 1 && "border-b border-border md:border-b-0 md:border-r",
+          ]}>
+            <div class="mb-3 font-mono text-[10px] uppercase tracking-widest text-dim">{feature.id}</div>
+            <h3 class="text-base font-semibold md:text-lg">{feature.title}</h3>
+            <p class="mt-2 text-sm leading-relaxed text-muted">{feature.description}</p>
+            <div class="mt-6 flex-1">
+              <img src={feature.image} alt={feature.alt} class="w-full" />
+            </div>
+          </div>
+        ))
+      }
+    </div>
+
+    <div class="flex items-center gap-2 py-6">
+      <span class="measure">grid: 3 cols</span>
+      <div class="h-px flex-1 border-t border-dashed border-dim"></div>
+    </div>
+  </div>
+</section>

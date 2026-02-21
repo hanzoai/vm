@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 40" fill="none">
+  <!-- > chevron -->
+  <polygon points="0,2 7,2 22,20 7,38 0,38 15,20" fill="#f59e0b" />
+  <!-- _ cursor -->
+  <rect x="24" y="32" width="20" height="6" rx="1" fill="#f59e0b" />
+</svg>

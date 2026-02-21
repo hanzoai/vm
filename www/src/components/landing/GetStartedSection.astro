@@ -1,0 +1,66 @@
+<section id="get-started" class="relative border-x border-border">
+  <span class="section-label">Install</span>
+
+  <div class="px-8 pt-16 pb-16 md:px-16 md:pt-24 md:pb-24">
+    <div class="text-center">
+      <h2 class="text-2xl font-semibold tracking-tight md:text-4xl lg:text-5xl">
+        Get started in seconds.
+      </h2>
+      <p class="mt-4 text-base text-muted">
+        One command to install. One command to run.
+      </p>
+    </div>
+
+    <div class="mx-auto mt-12 max-w-2xl border border-border">
+      <div class="flex items-center gap-2 border-b border-border px-4 py-2.5">
+        <span class="h-2.5 w-2.5 border border-[#ff5f57] bg-[#ff5f57]/20"></span>
+        <span class="h-2.5 w-2.5 border border-[#febc2e] bg-[#febc2e]/20"></span>
+        <span class="h-2.5 w-2.5 border border-[#28c840] bg-[#28c840]/20"></span>
+        <span class="ml-2 font-mono text-[10px] text-dim">terminal</span>
+      </div>
+      <div class="relative p-5 font-mono text-xs leading-[1.8] md:p-6 md:text-sm">
+        <button
+          id="copy-install"
+          class="absolute top-4 right-4 flex h-7 w-7 items-center justify-center border border-border text-dim transition-colors hover:border-muted hover:text-muted"
+          aria-label="Copy install command"
+        >
+          <svg id="copy-icon" class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
+            <rect x="9" y="9" width="13" height="13" rx="0" />
+            <path d="M5 15H4a1 1 0 01-1-1V4a1 1 0 011-1h10a1 1 0 011 1v1" />
+          </svg>
+          <svg id="check-icon" class="hidden h-3.5 w-3.5 text-amber" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
+            <path d="M5 13l4 4L19 7" />
+          </svg>
+        </button>
+        <p class="text-dim"># Install</p>
+        <p>
+          <span class="text-dim">$</span>
+          <span class="text-text"> curl -fsSL https://raw.githubusercontent.com/superhq-ai/shuru/main/install.sh | sh</span>
+        </p>
+        <br />
+        <p class="text-dim"># Run your first sandbox</p>
+        <p>
+          <span class="text-dim">$</span>
+          <span class="text-text"> shuru run</span>
+        </p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<script>
+  const copyBtn = document.getElementById("copy-install");
+  const copyIcon = document.getElementById("copy-icon");
+  const checkIcon = document.getElementById("check-icon");
+
+  copyBtn?.addEventListener("click", async () => {
+    const text = "curl -fsSL https://raw.githubusercontent.com/superhq-ai/shuru/main/install.sh | sh";
+    await navigator.clipboard.writeText(text);
+    copyIcon?.classList.add("hidden");
+    checkIcon?.classList.remove("hidden");
+    setTimeout(() => {
+      copyIcon?.classList.remove("hidden");
+      checkIcon?.classList.add("hidden");
+    }, 2000);
+  });
+</script>

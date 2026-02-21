@@ -1,0 +1,100 @@
+---
+const useCases = [
+  {
+    id: "01",
+    title: "Code Execution",
+    description: "Run AI-generated code in isolated VMs with real-time output.",
+    image: "/images/usecase-code.svg",
+    alt: "Terminal with code execution",
+  },
+  {
+    id: "02",
+    title: "Tool Use",
+    description: "Let agents install packages, compile code, and use system tools safely.",
+    image: "/images/usecase-tools.svg",
+    alt: "Gears and package installation",
+  },
+  {
+    id: "03",
+    title: "Evaluations",
+    description: "Spin up parallel sandboxes for reproducible evals across environments.",
+    image: "/images/usecase-evals.svg",
+    alt: "Parallel evaluation pipeline",
+  },
+  {
+    id: "04",
+    title: "Development",
+    description: "Disposable Linux environments for testing, debugging, and prototyping.",
+    image: "/images/usecase-dev.svg",
+    alt: "Laptop with floating sandbox",
+  },
+];
+---
+
+<section class="relative border-x border-border">
+  <span class="section-label">Use Cases</span>
+
+  <div class="border-b border-dashed border-border px-8 pt-16 pb-16 md:px-16 md:pt-24 md:pb-24">
+    <div class="flex items-end justify-between">
+      <h2 class="text-2xl font-semibold tracking-tight md:text-4xl lg:text-5xl">
+        Built for Agents.
+        <br />
+        <span class="text-muted">Safe execution for any workload.</span>
+      </h2>
+      <div class="hidden gap-1 md:flex">
+        <button
+          id="carousel-prev"
+          class="flex h-8 w-8 items-center justify-center border border-border text-dim transition-colors hover:border-muted hover:text-muted"
+          aria-label="Previous"
+        >
+          <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="square" stroke-width="2" d="M15 19l-7-7 7-7" />
+          </svg>
+        </button>
+        <button
+          id="carousel-next"
+          class="flex h-8 w-8 items-center justify-center border border-border text-dim transition-colors hover:border-muted hover:text-muted"
+          aria-label="Next"
+        >
+          <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="square" stroke-width="2" d="M9 5l7 7-7 7" />
+          </svg>
+        </button>
+      </div>
+    </div>
+
+    <div id="carousel" class="carousel mt-12 flex gap-0 overflow-x-auto scroll-smooth border border-border">
+      {
+        useCases.map((useCase, index) => (
+          <div class:list={[
+            "flex min-w-[260px] flex-col md:min-w-[300px]",
+            index < useCases.length - 1 && "border-r border-border",
+          ]}>
+            <div class="p-5 md:p-6">
+              <div class="mb-2 font-mono text-[10px] uppercase tracking-widest text-dim">{useCase.id}</div>
+              <h3 class="font-mono text-sm font-medium">{useCase.title}</h3>
+              <p class="mt-2 text-xs leading-relaxed text-muted">{useCase.description}</p>
+            </div>
+            <div class="mt-auto p-5 pt-0 md:p-6 md:pt-0">
+              <img src={useCase.image} alt={useCase.alt} class="w-full" />
+            </div>
+          </div>
+        ))
+      }
+    </div>
+  </div>
+</section>
+
+<script>
+  const carousel = document.getElementById("carousel");
+  const prev = document.getElementById("carousel-prev");
+  const next = document.getElementById("carousel-next");
+  const scrollAmount = 300;
+
+  prev?.addEventListener("click", () => {
+    carousel?.scrollBy({ left: -scrollAmount, behavior: "smooth" });
+  });
+  next?.addEventListener("click", () => {
+    carousel?.scrollBy({ left: scrollAmount, behavior: "smooth" });
+  });
+</script>
