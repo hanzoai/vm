@@ -163,6 +163,16 @@ DHCPEOF
                 ln -sf busybox "/initramfs/bin/${cmd}"
             done
 
+            # resize2fs for growing the ext4 filesystem to fill the disk image
+            # (dynamically linked, so we need the musl linker + shared libs)
+            apk add --no-cache e2fsprogs-extra > /dev/null 2>&1
+            cp /usr/sbin/resize2fs /initramfs/sbin/resize2fs
+            mkdir -p /initramfs/lib
+            cp /lib/ld-musl-aarch64.so.1 /initramfs/lib/
+            for lib in $(ldd /usr/sbin/resize2fs | grep -o '\''/lib/[^ ]*'\''); do
+                cp "$lib" /initramfs/lib/
+            done
+
             # Copy needed modules (virtio_blk, ext4, net, vsock and deps)
             echo "Copying kernel modules..."
             for mod in \
@@ -237,6 +247,9 @@ if [ ! -b /dev/vda ]; then
     echo "Dropping to shell..."
     exec /bin/sh
 fi
+
+echo "initramfs: resizing filesystem..."
+/sbin/resize2fs /dev/vda 2>/dev/null || true
 
 echo "initramfs: mounting /dev/vda..."
 /bin/mount -t ext4 /dev/vda /newroot
