@@ -1,3 +1,5 @@
+mod assets;
+
 use std::collections::HashMap;
 use std::io::IsTerminal;
 use std::process;
@@ -8,7 +10,7 @@ use clap::Parser;
 use shuru_vm::{default_data_dir, Sandbox, VmState};
 
 #[derive(Parser)]
-#[command(name = "shuru", about = "microVM sandbox for AI agents")]
+#[command(name = "shuru", about = "microVM sandbox for AI agents", version)]
 struct Cli {
     #[command(subcommand)]
     command: Commands,
@@ -46,6 +48,16 @@ enum Commands {
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         command: Vec<String>,
     },
+
+    /// Download or update OS image assets
+    Init {
+        /// Force re-download even if assets exist
+        #[arg(long)]
+        force: bool,
+    },
+
+    /// Upgrade shuru to the latest release (CLI + OS image)
+    Upgrade,
 }
 
 fn main() -> Result<()> {
@@ -69,19 +81,29 @@ fn main() -> Result<()> {
             command,
         } => {
             let data_dir = default_data_dir();
+
+            // Auto-download assets when using default paths
+            if kernel.is_none()
+                && rootfs.is_none()
+                && initrd.is_none()
+                && !assets::assets_ready(&data_dir)
+            {
+                assets::download_os_image(&data_dir)?;
+            }
+
             let kernel_path = kernel.unwrap_or_else(|| format!("{}/Image", data_dir));
             let rootfs_path = rootfs.unwrap_or_else(|| format!("{}/rootfs.ext4", data_dir));
             let initrd_path = initrd.unwrap_or_else(|| format!("{}/initramfs.cpio.gz", data_dir));
 
             if !std::path::Path::new(&kernel_path).exists() {
                 bail!(
-                    "Kernel not found at {}. Run scripts/prepare-rootfs.sh first.",
+                    "Kernel not found at {}. Run `shuru init` to download.",
                     kernel_path
                 );
             }
             if !std::path::Path::new(&rootfs_path).exists() {
                 bail!(
-                    "Rootfs not found at {}. Run scripts/prepare-rootfs.sh first.",
+                    "Rootfs not found at {}. Run `shuru init` to download.",
                     rootfs_path
                 );
             }
@@ -154,6 +176,24 @@ fn main() -> Result<()> {
                 let _ = sandbox.stop();
                 process::exit(exit_code);
             }
+        }
+        Commands::Init { force } => {
+            let data_dir = default_data_dir();
+            if force {
+                let _ = std::fs::remove_file(format!("{}/VERSION", data_dir));
+            }
+            if assets::assets_ready(&data_dir) {
+                eprintln!(
+                    "shuru: OS image already up to date ({})",
+                    assets::CURRENT_VERSION
+                );
+            } else {
+                assets::download_os_image(&data_dir)?;
+            }
+        }
+        Commands::Upgrade => {
+            let data_dir = default_data_dir();
+            assets::upgrade(&data_dir)?;
         }
     }
 

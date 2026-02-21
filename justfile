@@ -42,3 +42,15 @@ check:
 # Run clippy on all crates
 clippy:
     cargo clippy --workspace
+
+# Install the binary to ~/.local/bin with codesign
+install: build-guest
+    cargo build -p shuru-cli --release
+    codesign --entitlements shuru.entitlements --force -s - target/release/shuru
+    mkdir -p ~/.local/bin
+    cp target/release/shuru ~/.local/bin/shuru
+
+# Tag and push a release (triggers GitHub Actions)
+release version:
+    git tag -a "v{{ version }}" -m "Release v{{ version }}"
+    git push origin "v{{ version }}"

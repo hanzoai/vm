@@ -274,6 +274,9 @@ if [[ "$(uname)" == "Darwin" ]]; then
     rm -rf "$DOCKER_WORKDIR"
 else
     # Linux: can use native tools
+    if ! command -v mkfs.ext4 &>/dev/null; then
+        sudo apt-get update && sudo apt-get install -y e2fsprogs
+    fi
     mkfs.ext4 -F "$ROOTFS_IMG"
     MOUNT_DIR=$(mktemp -d)
     sudo mount -o loop "$ROOTFS_IMG" "$MOUNT_DIR"

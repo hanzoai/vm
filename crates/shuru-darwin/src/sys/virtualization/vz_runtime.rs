@@ -1,4 +1,6 @@
 #![allow(non_snake_case)]
+// objc2 0.3.0-beta.5's extern_protocol! macro doesn't propagate safety docs to clippy
+#![allow(clippy::missing_safety_doc)]
 use std::ffi::c_void;
 
 use block2::Block;
