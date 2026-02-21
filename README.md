@@ -105,9 +105,9 @@ Shuru is a Rust workspace with four crates:
 ### Boot sequence
 
 1. **Kernel** -- Alpine `linux-virt` (ARM64, uncompressed `Image`). VirtIO core drivers are built-in.
-2. **Initramfs** -- Loads kernel modules that are not built-in (`virtio_blk`, `ext4`, `vsock`, etc.), waits for `/dev/vda`, then `switch_root` into the rootfs.
+2. **Initramfs** -- Loads kernel modules that are not built-in (`virtio_blk`, `ext4`, `af_packet`, `virtio_net`, `vsock`, etc.), waits for `/dev/vda`, mounts the rootfs, runs DHCP on `eth0` if a network device is present, then `switch_root` into the rootfs.
 3. **Rootfs** -- A 512 MB ext4 image containing Alpine minirootfs. `shuru-guest` is installed at `/usr/bin/shuru-init` and runs as PID 1.
-4. **Guest init** -- Mounts filesystems (`proc`, `sysfs`, `devtmpfs`, `devpts`, `tmpfs`), sets hostname to `shuru`, optionally runs DHCP on `eth0`, then listens for vsock connections on port 1024.
+4. **Guest init** -- Mounts filesystems (`proc`, `sysfs`, `devtmpfs`, `devpts`, `tmpfs`), sets hostname to `shuru`, detects if networking was already configured by the initramfs (skips DHCP if so), then listens for vsock connections on port 1024.
 
 ### Sandbox permissions
 
@@ -123,13 +123,12 @@ Without `--allow-net`, no network device is attached to the VM -- the guest has 
 
 When `--allow-net` is set, Shuru attaches a VirtIO network device with a NAT attachment (via `VZNATNetworkDeviceAttachment`). macOS handles all routing transparently.
 
-On the guest side, `shuru-guest` runs a built-in DHCP client -- no external tools needed. It:
+DHCP runs in two stages to avoid timing races with the host NAT attachment:
 
-1. Brings up `eth0` via `ioctl`
-2. Performs a full DHCP exchange (DISCOVER -> OFFER -> REQUEST -> ACK)
-3. Configures the IP address, subnet mask, default gateway, and DNS (`/etc/resolv.conf`)
+1. **Initramfs (primary)** -- After loading the `af_packet` and `virtio_net` modules, the initramfs runs `udhcpc` (busybox) before `switch_root`. This runs early enough that the host NAT is ready, and configures the IP, gateway, and writes DNS to the rootfs `/etc/resolv.conf`.
+2. **Guest init (fallback)** -- `shuru-guest` checks if `eth0` already has an IP via `SIOCGIFADDR`. If it does, DHCP is skipped entirely. If not (e.g. custom initramfs without DHCP), it falls back to a built-in DHCP client.
 
-If `eth0` doesn't exist (no `--allow-net`), network setup is silently skipped.
+If `eth0` doesn't exist (no `--allow-net`), network setup is silently skipped in both stages.
 
 ### Host-guest communication (vsock)
 

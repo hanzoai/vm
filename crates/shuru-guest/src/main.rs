@@ -504,6 +504,24 @@ mod guest {
 
             bring_up_interface(sock, b"eth0\0");
 
+            // Check if eth0 already has an IP (configured by initramfs DHCP)
+            let already_configured = {
+                let mut ifr: libc::ifreq = std::mem::zeroed();
+                std::ptr::copy_nonoverlapping(
+                    b"eth0\0".as_ptr(),
+                    ifr.ifr_name.as_mut_ptr() as *mut u8,
+                    5,
+                );
+                libc::ioctl(sock, libc::SIOCGIFADDR as _, &mut ifr) == 0
+            };
+
+            if already_configured {
+                eprintln!("shuru-guest: network already configured (by initramfs)");
+                libc::close(sock);
+                return;
+            }
+
+            // Fallback: DHCP in userspace if initramfs didn't configure networking
             let mac = match get_mac_address(sock) {
                 Some(m) => m,
                 None => {

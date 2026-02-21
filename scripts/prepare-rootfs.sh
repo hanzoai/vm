@@ -117,9 +117,32 @@ fi
 # but virtio_blk, virtio_net, vsock are still modules (=m)
 if [ ! -f "$INITRAMFS_PATH" ]; then
     echo "==> Building initramfs with VirtIO modules..."
+
+    # Write udhcpc callback script to a temp file (avoids quoting issues inside docker)
+    UDHCPC_SCRIPT=$(mktemp)
+    cat > "$UDHCPC_SCRIPT" << 'DHCPEOF'
+#!/bin/sh
+case "$1" in
+bound|renew)
+    ifconfig "$interface" "$ip" netmask "$subnet" up
+    if [ -n "$router" ]; then
+        route add default gw "$router"
+    fi
+    # Write DNS to the real rootfs (already mounted at /newroot)
+    if [ -n "$dns" ] && [ -d /newroot/etc ]; then
+        > /newroot/etc/resolv.conf
+        for d in $dns; do
+            echo "nameserver $d" >> /newroot/etc/resolv.conf
+        done
+    fi
+    ;;
+esac
+DHCPEOF
+
     docker run --rm \
         --platform linux/arm64/v8 \
         -v "${DATA_DIR}:/output" \
+        -v "${UDHCPC_SCRIPT}:/tmp/udhcpc.sh:ro" \
         alpine:3.21 /bin/sh -c '
             set -e
             apk add --no-cache linux-virt kmod findutils cpio gzip > /dev/null 2>&1
@@ -136,7 +159,7 @@ if [ ! -f "$INITRAMFS_PATH" ]; then
             # since initramfs has no dynamic linker
             apk add --no-cache busybox-static > /dev/null 2>&1
             cp /bin/busybox.static /initramfs/bin/busybox
-            for cmd in sh mount umount switch_root modprobe insmod mkdir echo cat sleep mknod ln; do
+            for cmd in sh mount umount switch_root modprobe insmod mkdir echo cat sleep mknod ln ifconfig route udhcpc; do
                 ln -sf busybox "/initramfs/bin/${cmd}"
             done
 
@@ -160,7 +183,8 @@ if [ ! -f "$INITRAMFS_PATH" ]; then
                 kernel/drivers/virtio/virtio_balloon.ko* \
                 kernel/drivers/virtio/virtio_mmio.ko* \
                 kernel/net/vmw_vsock/vsock_loopback.ko* \
-                kernel/net/vmw_vsock/vsock_diag.ko*; do
+                kernel/net/vmw_vsock/vsock_diag.ko* \
+                kernel/net/packet/af_packet.ko*; do
                 for f in /lib/modules/${KVER}/${mod}; do
                     if [ -f "${f}" ]; then
                         dest_dir="/initramfs/lib/modules/${KVER}/$(dirname ${mod})"
@@ -181,6 +205,10 @@ if [ ! -f "$INITRAMFS_PATH" ]; then
             # Regenerate modules.dep for our subset
             depmod -b /initramfs ${KVER} 2>/dev/null || true
 
+            # Copy udhcpc callback script (mounted from host temp file)
+            cp /tmp/udhcpc.sh /initramfs/etc/udhcpc.sh
+            chmod 755 /initramfs/etc/udhcpc.sh
+
             # Create init script
             cat > /initramfs/init << '\''INITEOF'\''
 #!/bin/sh
@@ -189,7 +217,7 @@ if [ ! -f "$INITRAMFS_PATH" ]; then
 /bin/mount -t devtmpfs none /dev
 
 echo "initramfs: loading modules..."
-for mod in virtio_blk crc32c_generic libcrc32c jbd2 mbcache ext4 virtio_net vsock vmw_vsock_virtio_transport_common vmw_vsock_virtio_transport; do
+for mod in virtio_blk crc32c_generic libcrc32c jbd2 mbcache ext4 af_packet virtio_net vsock vmw_vsock_virtio_transport_common vmw_vsock_virtio_transport; do
     /bin/modprobe ${mod} 2>/dev/null && echo "  loaded: ${mod}" || echo "  FAILED: ${mod}"
 done
 
@@ -219,6 +247,18 @@ if [ ! -x /newroot/usr/bin/shuru-init ]; then
     exec /bin/sh
 fi
 
+# Network setup (if eth0 exists) -- do DHCP before switch_root
+# so shuru-guest does not race the host NAT attachment
+if ifconfig eth0 up 2>/dev/null; then
+    echo "initramfs: configuring network via DHCP..."
+    udhcpc -i eth0 -n -q -s /etc/udhcpc.sh -t 5 -T 2 2>/dev/null
+    if [ $? -eq 0 ]; then
+        echo "initramfs: network configured"
+    else
+        echo "initramfs: DHCP failed (will retry in guest)"
+    fi
+fi
+
 echo "initramfs: switching to real root..."
 /bin/umount /proc
 /bin/umount /sys
@@ -232,6 +272,7 @@ INITEOF
             find . | cpio -o -H newc 2>/dev/null | gzip > /output/initramfs.cpio.gz
             echo "==> Initramfs created: $(du -h /output/initramfs.cpio.gz | cut -f1)"
         '
+    rm -f "$UDHCPC_SCRIPT"
     echo "    Initramfs saved to ${INITRAMFS_PATH}"
 else
     echo "==> Initramfs already present."
