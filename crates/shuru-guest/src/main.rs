@@ -321,6 +321,13 @@ mod guest {
                 let status = child.wait().expect("failed to wait on child");
                 let exit_code = status.code().unwrap_or(-1);
 
+                // Flush all filesystem writes to disk before reporting exit.
+                // Without this, data can be lost if the VM is stopped immediately
+                // after the exit code is sent (e.g. during checkpoint create).
+                unsafe {
+                    libc::sync();
+                }
+
                 if !stdout_data.is_empty() {
                     let resp = ExecResponse {
                         msg_type: "stdout".into(),
@@ -597,6 +604,14 @@ mod guest {
         unsafe {
             libc::waitpid(child_pid, &mut status, 0);
         }
+
+        // Flush all filesystem writes to disk before reporting exit.
+        // Without this, data can be lost if the VM is stopped immediately
+        // after the exit code is sent (e.g. during checkpoint create).
+        unsafe {
+            libc::sync();
+        }
+
         let exit_code = if libc::WIFEXITED(status) {
             libc::WEXITSTATUS(status)
         } else if libc::WIFSIGNALED(status) {
