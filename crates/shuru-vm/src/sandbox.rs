@@ -24,7 +24,7 @@ pub struct VmConfigBuilder {
     cpus: usize,
     memory_mb: u64,
     console: bool,
-    network: bool,
+    allow_net: bool,
 }
 
 impl VmConfigBuilder {
@@ -36,7 +36,7 @@ impl VmConfigBuilder {
             cpus: 2,
             memory_mb: 2048,
             console: true,
-            network: false,
+            allow_net: false,
         }
     }
 
@@ -74,8 +74,8 @@ impl VmConfigBuilder {
     }
 
     /// Enable network access (NAT). Disabled by default for sandboxing.
-    pub fn network(mut self, enabled: bool) -> Self {
-        self.network = enabled;
+    pub fn allow_net(mut self, enabled: bool) -> Self {
+        self.allow_net = enabled;
         self
     }
 
@@ -112,7 +112,7 @@ impl VmConfigBuilder {
         let block_device = VirtioBlockDevice::new(&disk_attachment);
         config.set_storage_devices(&[block_device]);
 
-        if self.network {
+        if self.allow_net {
             let net_attachment = NATNetworkAttachment::new();
             let net_device = VirtioNetworkDevice::new_with_attachment(&net_attachment);
             net_device.set_mac_address(&MACAddress::random_local());

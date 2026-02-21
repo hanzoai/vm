@@ -6,8 +6,39 @@ use std::process;
 
 use anyhow::{bail, Result};
 use clap::Parser;
+use serde::Deserialize;
 
 use shuru_vm::{default_data_dir, Sandbox, VmState};
+
+#[derive(Default, Deserialize)]
+struct ShuruConfig {
+    cpus: Option<usize>,
+    memory: Option<u64>,
+    allow_net: Option<bool>,
+    command: Option<Vec<String>>,
+}
+
+fn load_config(config_flag: Option<&str>) -> Result<ShuruConfig> {
+    let path = match config_flag {
+        Some(p) => std::path::PathBuf::from(p),
+        None => std::path::PathBuf::from("shuru.json"),
+    };
+
+    match std::fs::read_to_string(&path) {
+        Ok(contents) => {
+            let cfg: ShuruConfig = serde_json::from_str(&contents)
+                .map_err(|e| anyhow::anyhow!("Failed to parse {}: {}", path.display(), e))?;
+            Ok(cfg)
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            if config_flag.is_some() {
+                bail!("Config file not found: {}", path.display());
+            }
+            Ok(ShuruConfig::default())
+        }
+        Err(e) => bail!("Failed to read {}: {}", path.display(), e),
+    }
+}
 
 #[derive(Parser)]
 #[command(name = "shuru", about = "microVM sandbox for AI agents", version)]
@@ -18,15 +49,15 @@ struct Cli {
 
 #[derive(clap::Subcommand)]
 enum Commands {
-    /// Boot a VM and optionally run a command inside it
+    /// Boot a VM and run a command inside it
     Run {
         /// Number of CPU cores
-        #[arg(long, default_value = "2")]
-        cpus: usize,
+        #[arg(long)]
+        cpus: Option<usize>,
 
         /// Memory in MB
-        #[arg(long, default_value = "2048")]
-        memory: u64,
+        #[arg(long)]
+        memory: Option<u64>,
 
         /// Path to kernel
         #[arg(long, env = "SHURU_KERNEL")]
@@ -42,7 +73,15 @@ enum Commands {
 
         /// Allow network access (NAT)
         #[arg(long)]
-        net: bool,
+        allow_net: bool,
+
+        /// Path to config file (default: ./shuru.json)
+        #[arg(long)]
+        config: Option<String>,
+
+        /// Attach to raw serial console instead of running a command
+        #[arg(long)]
+        console: bool,
 
         /// Command and arguments to run inside the VM
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
@@ -77,9 +116,27 @@ fn main() -> Result<()> {
             kernel,
             rootfs,
             initrd,
-            net,
+            allow_net,
+            config,
+            console,
             command,
         } => {
+            let cfg = load_config(config.as_deref())?;
+
+            // Resolution: CLI flag > config file > hardcoded default
+            let cpus = cpus.or(cfg.cpus).unwrap_or(2);
+            let memory = memory.or(cfg.memory).unwrap_or(2048);
+            let allow_net = allow_net || cfg.allow_net.unwrap_or(false);
+
+            // Command resolution: CLI args > config > default /bin/sh
+            let command = if !command.is_empty() {
+                command
+            } else if let Some(cfg_cmd) = cfg.command {
+                cfg_cmd
+            } else {
+                vec!["/bin/sh".to_string()]
+            };
+
             let data_dir = default_data_dir();
 
             // Auto-download assets when using default paths
@@ -127,15 +184,15 @@ fn main() -> Result<()> {
                 .rootfs(&rootfs_path)
                 .cpus(cpus)
                 .memory_mb(memory)
-                .network(net);
+                .allow_net(allow_net);
 
             if let Some(initrd) = initrd_opt {
                 eprintln!("shuru: using initramfs: {}", initrd);
                 builder = builder.initrd(initrd);
             }
 
-            // Disable serial console stdin in exec/shell mode
-            if !command.is_empty() {
+            // In console mode, keep serial stdin; otherwise disconnect it
+            if !console {
                 builder = builder.console(false);
             }
 
@@ -148,7 +205,7 @@ fn main() -> Result<()> {
             sandbox.start()?;
             eprintln!("shuru: VM started");
 
-            if command.is_empty() {
+            if console {
                 eprintln!("shuru: running in console mode (Ctrl+C to stop)");
                 loop {
                     match state_rx.recv() {
