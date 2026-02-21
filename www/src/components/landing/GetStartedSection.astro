@@ -35,7 +35,7 @@
         <p class="text-dim"># Install</p>
         <p>
           <span class="text-dim">$</span>
-          <span class="text-text"> curl -fsSL https://raw.githubusercontent.com/superhq-ai/shuru/main/install.sh | sh</span>
+          <span class="text-text"> curl -fsSL https://shuru.run/install.sh | sh</span>
         </p>
         <br />
         <p class="text-dim"># Run your first sandbox</p>
@@ -54,7 +54,7 @@
   const checkIcon = document.getElementById("check-icon");
 
   copyBtn?.addEventListener("click", async () => {
-    const text = "curl -fsSL https://raw.githubusercontent.com/superhq-ai/shuru/main/install.sh | sh";
+    const text = "curl -fsSL https://shuru.run/install.sh | sh";
     await navigator.clipboard.writeText(text);
     copyIcon?.classList.add("hidden");
     checkIcon?.classList.remove("hidden");

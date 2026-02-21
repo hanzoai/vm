@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths:
       - "www/**"
+      - "install.sh"
   workflow_dispatch:
 
 permissions:
@@ -27,6 +28,9 @@ jobs:
       - name: Install dependencies
         working-directory: ./www
         run: bun install --frozen-lockfile
+
+      - name: Copy install script
+        run: cp install.sh www/public/install.sh
 
       - name: Build
         working-directory: ./www
