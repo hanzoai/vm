@@ -46,6 +46,7 @@ curl -fsSL "$URL" -o "$TMPDIR/$TARBALL"
 mkdir -p "$INSTALL_DIR"
 tar -xzf "$TMPDIR/$TARBALL" -C "$INSTALL_DIR"
 chmod +x "$INSTALL_DIR/shuru"
+xattr -d com.apple.quarantine "$INSTALL_DIR/shuru" 2>/dev/null || true
 
 echo ""
 echo "Installed shuru $VERSION to $INSTALL_DIR/shuru"
