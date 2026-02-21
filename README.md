@@ -30,19 +30,36 @@ shuru run --allow-net
 shuru run --cpus 4 --memory 4096 --disk-size 8192 -- make -j4
 ```
 
+### Port forwarding
+
+Forward host ports to guest ports over vsock. Works without `--allow-net` — the guest needs no network device.
+
+```sh
+# Forward host:8080 → guest:8000
+shuru run -p 8080:8000 -- python3 -m http.server 8000
+
+# Multiple ports
+shuru run -p 8080:80 -p 8443:443 -- nginx
+
+# From the host
+curl http://127.0.0.1:8080/
+```
+
+Port forwards can also be set in `shuru.json` (see [Config file](#config-file)).
+
 ### Checkpoints
 
 Checkpoints save the disk state so you can reuse an environment across runs.
 
 ```sh
 # Set up an environment and save it
-shuru checkpoint create myenv -- sh -c 'apk add python3 gcc'
+shuru checkpoint create myenv --allow-net -- sh -c 'apk add python3 gcc'
 
 # Run from a checkpoint (ephemeral -- changes are discarded)
 shuru run --from myenv -- python3 script.py
 
 # Branch from an existing checkpoint
-shuru checkpoint create myenv2 --from myenv -- sh -c 'pip install numpy'
+shuru checkpoint create myenv2 --from myenv --allow-net -- sh -c 'pip install numpy'
 
 # List and delete
 shuru checkpoint list
@@ -59,6 +76,7 @@ Shuru loads `shuru.json` from the current directory (or `--config PATH`). All fi
   "memory": 4096,
   "disk_size": 8192,
   "allow_net": true,
+  "ports": ["8080:80"],
   "command": ["python", "script.py"]
 }
 ```
@@ -72,15 +90,16 @@ Shuru loads `shuru.json` from the current directory (or `--config PATH`). All fi
 │  shuru-cli ──► shuru-vm ──► shuru-darwin    │
 │                   │      (Virtualization.framework)
 │                   │                         │
-│               ┌───┴────────────┐            │
-│               │  vsock :1024   │            │
-│               └───┬────────────┘            │
-├───────────────────┼─────────────────────────┤
-│  Linux Guest      │                         │
-│               ┌───┴────────────┐            │
-│               │  shuru-guest   │            │
-│               │  (PID 1 init)  │            │
-│               └────────────────┘            │
+│         ┌────────┼─────────┐                │
+│         │ vsock :1024 exec │                │
+│         │ vsock :1025 fwd  │                │
+│         └────────┼─────────┘                │
+├──────────────────┼──────────────────────────┤
+│  Linux Guest     │                          │
+│         ┌────────┴─────────┐                │
+│         │   shuru-guest    │                │
+│         │   (PID 1 init)   │                │
+│         └──────────────────┘                │
 │  Alpine Linux 3.21 / linux-virt 6.12        │
 └─────────────────────────────────────────────┘
 ```

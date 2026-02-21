@@ -7,6 +7,7 @@ mod guest {
     use serde::{Deserialize, Serialize};
 
     const VSOCK_PORT: u32 = 1024;
+    const VSOCK_PORT_FORWARD: u32 = 1025;
 
     #[derive(Deserialize)]
     pub struct ExecRequest {
@@ -630,6 +631,104 @@ mod guest {
         );
     }
 
+    // --- Port forwarding ---
+
+    #[derive(Deserialize)]
+    struct ForwardRequest {
+        port: u16,
+    }
+
+    #[derive(Serialize)]
+    struct ForwardResponse {
+        status: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        message: Option<String>,
+    }
+
+    fn forward_accept_loop(listener_fd: i32) {
+        loop {
+            let client_fd = unsafe {
+                libc::accept(listener_fd, std::ptr::null_mut(), std::ptr::null_mut())
+            };
+
+            if client_fd < 0 {
+                continue;
+            }
+
+            std::thread::spawn(move || {
+                handle_forward_connection(client_fd);
+            });
+        }
+    }
+
+    fn handle_forward_connection(fd: i32) {
+        let stream = unsafe { std::net::TcpStream::from_raw_fd(fd) };
+        let mut reader = BufReader::new(stream.try_clone().expect("clone vsock stream"));
+        let mut writer = stream;
+
+        // Read the forward request (one JSON line)
+        let mut line = String::new();
+        if reader.read_line(&mut line).is_err() || line.trim().is_empty() {
+            return;
+        }
+
+        let req: ForwardRequest = match serde_json::from_str(line.trim()) {
+            Ok(r) => r,
+            Err(e) => {
+                let resp = ForwardResponse {
+                    status: "error".into(),
+                    message: Some(format!("invalid request: {}", e)),
+                };
+                let _ = writeln!(writer, "{}", serde_json::to_string(&resp).unwrap());
+                return;
+            }
+        };
+
+        // Connect to the target port on localhost inside the guest
+        let tcp_stream = match std::net::TcpStream::connect(("127.0.0.1", req.port)) {
+            Ok(s) => s,
+            Err(e) => {
+                let resp = ForwardResponse {
+                    status: "error".into(),
+                    message: Some(format!("connection refused: {}", e)),
+                };
+                let _ = writeln!(writer, "{}", serde_json::to_string(&resp).unwrap());
+                return;
+            }
+        };
+
+        // Send success response
+        let resp = ForwardResponse {
+            status: "ok".into(),
+            message: None,
+        };
+        if writeln!(writer, "{}", serde_json::to_string(&resp).unwrap()).is_err() {
+            return;
+        }
+        let _ = writer.flush();
+
+        // Bidirectional relay between vsock and TCP
+        forward_relay(writer, tcp_stream);
+    }
+
+    fn forward_relay(vsock: std::net::TcpStream, tcp: std::net::TcpStream) {
+        let mut vsock_read = vsock.try_clone().expect("clone vsock");
+        let mut tcp_write = tcp.try_clone().expect("clone tcp");
+        let mut tcp_read = tcp;
+        let mut vsock_write = vsock;
+
+        let t1 = std::thread::spawn(move || {
+            let _ = std::io::copy(&mut vsock_read, &mut tcp_write);
+            let _ = tcp_write.shutdown(std::net::Shutdown::Write);
+        });
+        let t2 = std::thread::spawn(move || {
+            let _ = std::io::copy(&mut tcp_read, &mut vsock_write);
+            let _ = vsock_write.shutdown(std::net::Shutdown::Write);
+        });
+        let _ = t1.join();
+        let _ = t2.join();
+    }
+
     extern "C" fn sigchld_handler(_: libc::c_int) {
         // Noop — actual reaping happens in the main loop
     }
@@ -665,6 +764,15 @@ mod guest {
 
         let listener_fd = create_vsock_listener(VSOCK_PORT);
         eprintln!("shuru-guest: vsock listening on port {}", VSOCK_PORT);
+
+        let fwd_listener_fd = create_vsock_listener(VSOCK_PORT_FORWARD);
+        eprintln!(
+            "shuru-guest: port forward listener on port {}",
+            VSOCK_PORT_FORWARD
+        );
+        std::thread::spawn(move || {
+            forward_accept_loop(fwd_listener_fd);
+        });
 
         loop {
             let client_fd = unsafe {

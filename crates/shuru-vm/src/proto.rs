@@ -30,3 +30,26 @@ pub enum ControlMessage {
     #[serde(rename = "resize")]
     Resize { rows: u16, cols: u16 },
 }
+
+// --- Port forwarding protocol ---
+
+/// A host:guest port mapping for port forwarding over vsock.
+#[derive(Debug, Clone)]
+pub struct PortMapping {
+    pub host_port: u16,
+    pub guest_port: u16,
+}
+
+/// Sent by the host over vsock to request forwarding to a guest port.
+#[derive(Serialize, Deserialize)]
+pub struct ForwardRequest {
+    pub port: u16,
+}
+
+/// Sent by the guest in response to a ForwardRequest.
+#[derive(Serialize, Deserialize)]
+pub struct ForwardResponse {
+    pub status: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub message: Option<String>,
+}

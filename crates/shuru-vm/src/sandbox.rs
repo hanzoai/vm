@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Write};
-use std::net::TcpStream;
+use std::net::{Shutdown, TcpListener, TcpStream};
 use std::os::fd::AsRawFd;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -12,8 +12,8 @@ use crossbeam_channel::Receiver;
 use shuru_darwin::terminal;
 use shuru_darwin::*;
 
-use crate::proto::{ControlMessage, ExecRequest, ExecResponse};
-use crate::VSOCK_PORT;
+use crate::proto::{ControlMessage, ExecRequest, ExecResponse, ForwardRequest, ForwardResponse, PortMapping};
+use crate::{VSOCK_PORT, VSOCK_PORT_FORWARD};
 
 // --- VmConfigBuilder ---
 
@@ -130,7 +130,7 @@ impl VmConfigBuilder {
             .map_err(|e| anyhow::anyhow!("VM configuration invalid: {}", e))?;
 
         Ok(Sandbox {
-            vm: VirtualMachine::new(&config),
+            vm: Arc::new(VirtualMachine::new(&config)),
         })
     }
 }
@@ -138,7 +138,7 @@ impl VmConfigBuilder {
 // --- Sandbox ---
 
 pub struct Sandbox {
-    vm: VirtualMachine,
+    vm: Arc<VirtualMachine>,
 }
 
 impl Sandbox {
@@ -351,6 +351,60 @@ impl Sandbox {
         Ok(code)
     }
 
+    /// Start port forwarding proxies. Returns a handle that stops all
+    /// listeners when dropped.
+    pub fn start_port_forwarding(&self, forwards: &[PortMapping]) -> Result<PortForwardHandle> {
+        let stop = Arc::new(AtomicBool::new(false));
+        let mut listeners = Vec::new();
+
+        for mapping in forwards {
+            let addr = format!("127.0.0.1:{}", mapping.host_port);
+            let tcp_listener = TcpListener::bind(&addr)
+                .with_context(|| format!("Failed to bind port {}", mapping.host_port))?;
+            tcp_listener.set_nonblocking(true)?;
+
+            let guest_port = mapping.guest_port;
+            let vm = Arc::clone(&self.vm);
+            let stop_flag = stop.clone();
+
+            eprintln!(
+                "shuru: forwarding 127.0.0.1:{} -> guest:{}",
+                mapping.host_port, mapping.guest_port
+            );
+
+            let handle = std::thread::spawn(move || {
+                while !stop_flag.load(Ordering::Relaxed) {
+                    match tcp_listener.accept() {
+                        Ok((tcp_stream, _)) => {
+                            let vm = Arc::clone(&vm);
+                            std::thread::spawn(move || {
+                                if let Err(e) = handle_forward_connection(tcp_stream, &vm, guest_port) {
+                                    tracing::debug!("port forward connection error: {}", e);
+                                }
+                            });
+                        }
+                        Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                            std::thread::sleep(Duration::from_millis(50));
+                        }
+                        Err(e) => {
+                            if !stop_flag.load(Ordering::Relaxed) {
+                                tracing::debug!("accept error on port forward listener: {}", e);
+                            }
+                            break;
+                        }
+                    }
+                }
+            });
+
+            listeners.push(handle);
+        }
+
+        Ok(PortForwardHandle {
+            stop,
+            _threads: listeners,
+        })
+    }
+
     fn connect_vsock(&self) -> Result<TcpStream> {
         for attempt in 1..=10 {
             match self.vm.connect_to_vsock_port(VSOCK_PORT) {
@@ -366,4 +420,71 @@ impl Sandbox {
         }
         unreachable!()
     }
+}
+
+// --- Port forwarding ---
+
+/// Handle returned by `start_port_forwarding`. Signals all listener threads
+/// to stop when dropped.
+pub struct PortForwardHandle {
+    stop: Arc<AtomicBool>,
+    _threads: Vec<std::thread::JoinHandle<()>>,
+}
+
+impl Drop for PortForwardHandle {
+    fn drop(&mut self) {
+        self.stop.store(true, Ordering::Relaxed);
+    }
+}
+
+fn handle_forward_connection(
+    tcp_stream: TcpStream,
+    vm: &VirtualMachine,
+    guest_port: u16,
+) -> Result<()> {
+    let vsock_stream = vm
+        .connect_to_vsock_port(VSOCK_PORT_FORWARD)
+        .map_err(|e| anyhow::anyhow!("vsock connect for port forward: {}", e))?;
+
+    // Send forward request
+    let mut vsock_writer = vsock_stream.try_clone()?;
+    let req = ForwardRequest { port: guest_port };
+    writeln!(vsock_writer, "{}", serde_json::to_string(&req)?)?;
+    vsock_writer.flush()?;
+
+    // Read response
+    let mut vsock_reader = BufReader::new(vsock_stream.try_clone()?);
+    let mut line = String::new();
+    vsock_reader.read_line(&mut line)?;
+    let resp: ForwardResponse =
+        serde_json::from_str(line.trim()).context("parsing forward response")?;
+
+    if resp.status != "ok" {
+        bail!(
+            "guest refused forward: {}",
+            resp.message.unwrap_or_default()
+        );
+    }
+
+    // Bidirectional relay between TCP and vsock
+    relay(tcp_stream, vsock_stream);
+    Ok(())
+}
+
+fn relay(a: TcpStream, b: TcpStream) {
+    let mut a_read = a.try_clone().expect("clone tcp stream");
+    let mut b_write = b.try_clone().expect("clone vsock stream");
+    let mut b_read = b;
+    let mut a_write = a;
+
+    let t1 = std::thread::spawn(move || {
+        let _ = std::io::copy(&mut a_read, &mut b_write);
+        let _ = b_write.shutdown(Shutdown::Write);
+    });
+    let t2 = std::thread::spawn(move || {
+        let _ = std::io::copy(&mut b_read, &mut a_write);
+        let _ = a_write.shutdown(Shutdown::Write);
+    });
+    let _ = t1.join();
+    let _ = t2.join();
 }

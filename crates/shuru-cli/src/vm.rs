@@ -1,9 +1,9 @@
 use std::collections::HashMap;
 use std::io::IsTerminal;
 
-use anyhow::{bail, Result};
+use anyhow::{bail, Context, Result};
 
-use shuru_vm::Sandbox;
+use shuru_vm::{PortMapping, Sandbox};
 
 use crate::assets;
 use crate::cli::VmArgs;
@@ -19,6 +19,7 @@ pub(crate) struct PreparedVm {
     pub memory: u64,
     pub disk_size: u64,
     pub allow_net: bool,
+    pub forwards: Vec<PortMapping>,
 }
 
 /// Resolve config, create a CoW working copy of the rootfs, and extend it to disk_size.
@@ -31,6 +32,20 @@ pub(crate) fn prepare_vm(
     let memory = vm.memory.or(cfg.memory).unwrap_or(2048);
     let disk_size = vm.disk_size.or(cfg.disk_size).unwrap_or(4096);
     let allow_net = vm.allow_net || cfg.allow_net.unwrap_or(false);
+
+    // Merge port forwards: CLI flags + config file
+    let mut port_strs: Vec<&str> = vm.port.iter().map(|s| s.as_str()).collect();
+    if let Some(ref cfg_ports) = cfg.ports {
+        for p in cfg_ports {
+            port_strs.push(p.as_str());
+        }
+    }
+    let mut forwards = Vec::new();
+    for s in &port_strs {
+        let mapping = parse_port_mapping(s)
+            .with_context(|| format!("invalid port mapping: '{}'", s))?;
+        forwards.push(mapping);
+    }
 
     let data_dir = shuru_vm::default_data_dir();
 
@@ -118,6 +133,7 @@ pub(crate) fn prepare_vm(
         memory,
         disk_size,
         allow_net,
+        forwards,
     })
 }
 
@@ -151,6 +167,12 @@ pub(crate) fn run_command(prepared: &PreparedVm, command: &[String]) -> Result<i
     eprintln!("shuru: VM started");
     eprintln!("shuru: waiting for guest to be ready...");
 
+    let _fwd = if !prepared.forwards.is_empty() {
+        Some(sandbox.start_port_forwarding(&prepared.forwards)?)
+    } else {
+        None
+    };
+
     let exit_code = if std::io::stdin().is_terminal() {
         sandbox.shell(command, &HashMap::new())?
     } else {
@@ -159,4 +181,22 @@ pub(crate) fn run_command(prepared: &PreparedVm, command: &[String]) -> Result<i
 
     let _ = sandbox.stop();
     Ok(exit_code)
+}
+
+/// Parse a "HOST:GUEST" port mapping string.
+fn parse_port_mapping(s: &str) -> Result<PortMapping> {
+    let parts: Vec<&str> = s.split(':').collect();
+    if parts.len() != 2 {
+        bail!("expected HOST:GUEST format (e.g. 8080:80)");
+    }
+    let host_port: u16 = parts[0]
+        .parse()
+        .with_context(|| format!("invalid host port: '{}'", parts[0]))?;
+    let guest_port: u16 = parts[1]
+        .parse()
+        .with_context(|| format!("invalid guest port: '{}'", parts[1]))?;
+    Ok(PortMapping {
+        host_port,
+        guest_port,
+    })
 }

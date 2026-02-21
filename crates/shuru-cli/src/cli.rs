@@ -30,6 +30,10 @@ pub(crate) struct VmArgs {
     #[arg(long)]
     pub allow_net: bool,
 
+    /// Forward a host port to a guest port (HOST:GUEST, e.g. 8080:80)
+    #[arg(short = 'p', long = "port", value_name = "HOST:GUEST")]
+    pub port: Vec<String>,
+
     /// Path to config file (default: ./shuru.json)
     #[arg(long)]
     pub config: Option<String>,
