@@ -14,7 +14,7 @@ env:
 jobs:
   # ── Build OS image (kernel + initramfs + rootfs) on Linux ───────────
   build-os-image:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04-arm
     steps:
       - uses: actions/checkout@v4
 
@@ -23,12 +23,7 @@ jobs:
         with:
           targets: aarch64-unknown-linux-musl
 
-      - name: Install cross-compilation toolchain
-        run: sudo apt-get update && sudo apt-get install -y gcc-aarch64-linux-gnu
-
       - name: Build shuru-guest
-        env:
-          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER: aarch64-linux-gnu-gcc
         run: cargo build -p shuru-guest --target aarch64-unknown-linux-musl --release
 
       - name: Build OS image

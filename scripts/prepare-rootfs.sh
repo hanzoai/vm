@@ -118,6 +118,7 @@ fi
 if [ ! -f "$INITRAMFS_PATH" ]; then
     echo "==> Building initramfs with VirtIO modules..."
     docker run --rm \
+        --platform linux/arm64/v8 \
         -v "${DATA_DIR}:/output" \
         alpine:3.21 /bin/sh -c '
             set -e
@@ -253,6 +254,7 @@ if [[ "$(uname)" == "Darwin" ]]; then
 
     # Format + populate entirely inside Docker
     docker run --rm --privileged \
+        --platform linux/arm64/v8 \
         -v "${ROOTFS_IMG}:/rootfs.ext4" \
         -v "${DOCKER_WORKDIR}:/workdir:ro" \
         alpine:3.21 /bin/sh -c '
