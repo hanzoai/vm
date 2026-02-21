@@ -1,0 +1,56 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 300" fill="none">
+  <rect width="400" height="300" fill="#0a0a0a"/>
+
+  <!-- Main trunk -->
+  <line x1="140" y1="50" x2="140" y2="220" stroke="#525252" stroke-width="1"/>
+
+  <!-- Branch from node2 -->
+  <path d="M146 115 C170 115, 200 105, 240 85" stroke="#525252" stroke-width="1" fill="none" stroke-dasharray="200" stroke-dashoffset="200">
+    <animate attributeName="stroke-dashoffset" values="200;0" dur="3s" fill="freeze" repeatCount="indefinite"/>
+  </path>
+  <line x1="240" y1="85" x2="240" y2="165" stroke="#525252" stroke-width="1"/>
+
+  <!-- Sub-branch from branch mid -->
+  <path d="M246 130 C260 130, 275 125, 300 115" stroke="#525252" stroke-width="0.8" fill="none" stroke-dasharray="100" stroke-dashoffset="100">
+    <animate attributeName="stroke-dashoffset" values="100;0" dur="3s" begin="1.5s" fill="freeze" repeatCount="indefinite"/>
+  </path>
+
+  <!-- Node 1: base -->
+  <rect x="134" y="40" width="12" height="12" stroke="#f59e0b" stroke-width="1.5" fill="#0a0a0a"/>
+  <rect x="136.5" y="42.5" width="7" height="7" fill="#f59e0b" opacity="0.25"/>
+  <text x="125" y="50" text-anchor="end" font-family="monospace" font-size="8" fill="#525252">base</text>
+
+  <!-- Node 2: myenv -->
+  <rect x="134" y="105" width="12" height="12" stroke="#f59e0b" stroke-width="1.5" fill="#0a0a0a"/>
+  <rect x="136.5" y="107.5" width="7" height="7" fill="#f59e0b" opacity="0.25"/>
+  <text x="125" y="115" text-anchor="end" font-family="monospace" font-size="8" fill="#525252">myenv</text>
+
+  <!-- Node 3: trunk continue -->
+  <rect x="134" y="160" width="12" height="12" stroke="#525252" stroke-width="1" fill="#0a0a0a"/>
+
+  <!-- Node 4: myenv2 -->
+  <rect x="134" y="210" width="12" height="12" stroke="#f59e0b" stroke-width="1.5" fill="#0a0a0a"/>
+  <rect x="136.5" y="212.5" width="7" height="7" fill="#f59e0b" opacity="0.25"/>
+  <text x="125" y="220" text-anchor="end" font-family="monospace" font-size="8" fill="#f59e0b" opacity="0.6">myenv2</text>
+
+  <!-- Branch node 1 -->
+  <rect x="234" y="79" width="12" height="12" stroke="#f59e0b" stroke-width="1" fill="#0a0a0a"/>
+  <rect x="236.5" y="81.5" width="7" height="7" fill="#f59e0b" opacity="0.15"/>
+
+  <!-- Branch node 2 -->
+  <rect x="234" y="124" width="12" height="12" stroke="#525252" stroke-width="1" fill="#0a0a0a"/>
+
+  <!-- Branch node 3: HEAD — pulses -->
+  <rect x="234" y="159" width="12" height="12" stroke="#f59e0b" stroke-width="1.5" fill="#0a0a0a"/>
+  <rect x="236.5" y="161.5" width="7" height="7" fill="#f59e0b" opacity="0.25">
+    <animate attributeName="opacity" values="0.15;0.4;0.15" dur="3s" repeatCount="indefinite"/>
+  </rect>
+  <text x="255" y="169" font-family="monospace" font-size="7" fill="#f59e0b" opacity="0.6">HEAD</text>
+
+  <!-- Sub-branch node: fork -->
+  <rect x="294" y="109" width="12" height="12" stroke="#525252" stroke-width="1" fill="#0a0a0a"/>
+  <text x="315" y="119" font-family="monospace" font-size="7" fill="#525252">fork</text>
+
+  <!-- Bottom label -->
+  <text x="200" y="265" text-anchor="middle" font-family="monospace" font-size="8" fill="#525252">checkpoint DAG</text>
+</svg>

@@ -1,0 +1,67 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 250" fill="none">
+  <rect width="300" height="250" fill="#0a0a0a"/>
+
+  <!-- 4 parallel VM boxes -->
+  <rect x="35" y="50" width="48" height="60" stroke="#f59e0b" stroke-width="1" fill="none" opacity="0.8"/>
+  <rect x="37" y="52" width="44" height="10" stroke="none" fill="#f59e0b" opacity="0.05"/>
+  <line x1="43" y1="72" x2="70" y2="72" stroke="#525252" stroke-width="0.8"/>
+  <line x1="43" y1="80" x2="65" y2="80" stroke="#525252" stroke-width="0.8"/>
+  <line x1="43" y1="88" x2="72" y2="88" stroke="#f59e0b" stroke-width="0.8" opacity="0.3"/>
+  <line x1="43" y1="96" x2="60" y2="96" stroke="#525252" stroke-width="0.8"/>
+
+  <rect x="97" y="50" width="48" height="60" stroke="#f59e0b" stroke-width="1" fill="none" opacity="0.8"/>
+  <rect x="99" y="52" width="44" height="10" stroke="none" fill="#f59e0b" opacity="0.05"/>
+  <line x1="105" y1="72" x2="132" y2="72" stroke="#525252" stroke-width="0.8"/>
+  <line x1="105" y1="80" x2="127" y2="80" stroke="#525252" stroke-width="0.8"/>
+  <line x1="105" y1="88" x2="134" y2="88" stroke="#f59e0b" stroke-width="0.8" opacity="0.3"/>
+  <line x1="105" y1="96" x2="122" y2="96" stroke="#525252" stroke-width="0.8"/>
+
+  <rect x="159" y="50" width="48" height="60" stroke="#f59e0b" stroke-width="1" fill="none" opacity="0.8"/>
+  <rect x="161" y="52" width="44" height="10" stroke="none" fill="#f59e0b" opacity="0.05"/>
+  <line x1="167" y1="72" x2="194" y2="72" stroke="#525252" stroke-width="0.8"/>
+  <line x1="167" y1="80" x2="189" y2="80" stroke="#525252" stroke-width="0.8"/>
+  <line x1="167" y1="88" x2="196" y2="88" stroke="#f59e0b" stroke-width="0.8" opacity="0.3"/>
+  <line x1="167" y1="96" x2="184" y2="96" stroke="#525252" stroke-width="0.8"/>
+
+  <rect x="221" y="50" width="48" height="60" stroke="#f59e0b" stroke-width="1" fill="none" opacity="0.8"/>
+  <rect x="223" y="52" width="44" height="10" stroke="none" fill="#f59e0b" opacity="0.05"/>
+  <line x1="229" y1="72" x2="256" y2="72" stroke="#525252" stroke-width="0.8"/>
+  <line x1="229" y1="80" x2="251" y2="80" stroke="#525252" stroke-width="0.8"/>
+  <line x1="229" y1="88" x2="258" y2="88" stroke="#f59e0b" stroke-width="0.8" opacity="0.3"/>
+  <line x1="229" y1="96" x2="246" y2="96" stroke="#525252" stroke-width="0.8"/>
+
+  <!-- Checkmarks — stroke-dashoffset draw, staggered -->
+  <path d="M53 124 L57 129 L65 119" stroke="#f59e0b" stroke-width="1.5" fill="none" stroke-dasharray="20" stroke-dashoffset="20">
+    <animate attributeName="stroke-dashoffset" values="20;0;0;20" keyTimes="0;0.15;0.85;1" dur="5s" repeatCount="indefinite"/>
+  </path>
+  <path d="M115 124 L119 129 L127 119" stroke="#f59e0b" stroke-width="1.5" fill="none" stroke-dasharray="20" stroke-dashoffset="20">
+    <animate attributeName="stroke-dashoffset" values="20;0;0;20" keyTimes="0;0.15;0.85;1" dur="5s" begin="0.4s" repeatCount="indefinite"/>
+  </path>
+  <path d="M177 124 L181 129 L189 119" stroke="#f59e0b" stroke-width="1.5" fill="none" stroke-dasharray="20" stroke-dashoffset="20">
+    <animate attributeName="stroke-dashoffset" values="20;0;0;20" keyTimes="0;0.15;0.85;1" dur="5s" begin="0.8s" repeatCount="indefinite"/>
+  </path>
+  <path d="M239 124 L243 129 L251 119" stroke="#f59e0b" stroke-width="1.5" fill="none" stroke-dasharray="20" stroke-dashoffset="20">
+    <animate attributeName="stroke-dashoffset" values="20;0;0;20" keyTimes="0;0.15;0.85;1" dur="5s" begin="1.2s" repeatCount="indefinite"/>
+  </path>
+
+  <!-- Connector lines down -->
+  <line x1="59" y1="132" x2="59" y2="160" stroke="#525252" stroke-width="0.8"/>
+  <line x1="121" y1="132" x2="121" y2="160" stroke="#525252" stroke-width="0.8"/>
+  <line x1="183" y1="132" x2="183" y2="160" stroke="#525252" stroke-width="0.8"/>
+  <line x1="245" y1="132" x2="245" y2="160" stroke="#525252" stroke-width="0.8"/>
+
+  <!-- Horizontal merge line -->
+  <line x1="59" y1="160" x2="245" y2="160" stroke="#525252" stroke-width="0.8"/>
+
+  <!-- Down to results -->
+  <line x1="152" y1="160" x2="152" y2="185" stroke="#525252" stroke-width="0.8"/>
+
+  <!-- Results node — pulses after checkmarks -->
+  <rect x="112" y="185" width="80" height="30" stroke="#f59e0b" stroke-width="1" fill="#f59e0b" fill-opacity="0.05">
+    <animate attributeName="fill-opacity" values="0.05;0.15;0.05" dur="5s" begin="2s" repeatCount="indefinite"/>
+  </rect>
+  <text x="152" y="204" text-anchor="middle" font-family="monospace" font-size="9" fill="#f59e0b" opacity="0.7">RESULTS</text>
+
+  <!-- Label -->
+  <text x="152" y="240" text-anchor="middle" font-family="monospace" font-size="8" fill="#525252">parallel eval pipeline</text>
+</svg>

@@ -2,7 +2,7 @@
 
 Local-first microVM sandbox for AI agents on macOS.
 
-Shuru boots lightweight Linux VMs using Apple's Virtualization.framework. Each sandbox is ephemeral -- the rootfs resets on every run -- giving agents a disposable environment to execute code, install packages, and run tools without touching your host.
+Shuru boots lightweight Linux VMs using Apple's Virtualization.framework. Each sandbox is ephemeral: the rootfs resets on every run, giving agents a disposable environment to execute code, install packages, and run tools without touching your host.
 
 ## Requirements
 
@@ -14,62 +14,54 @@ Shuru boots lightweight Linux VMs using Apple's Virtualization.framework. Each s
 curl -fsSL https://raw.githubusercontent.com/superhq-ai/shuru/main/install.sh | sh
 ```
 
-This installs the `shuru` binary to `~/.local/bin/`.
-
 ## Usage
 
 ```sh
-# Interactive shell (default when no command given)
+# Interactive shell
 shuru run
 
-# Run a command in a sandbox
+# Run a command
 shuru run -- echo hello
 
-# Interactive shell with network access
+# With network access
 shuru run --allow-net
 
 # Custom resources
-shuru run --cpus 4 --memory 4096 -- make -j4
-
-# Use a project config file
-shuru run --config myproject.json
+shuru run --cpus 4 --memory 4096 --disk-size 8192 -- make -j4
 ```
 
-## Commands
+### Checkpoints
 
-| Command | Description |
-|---------|-------------|
-| `shuru run [OPTIONS] [-- <cmd>]` | Boot a VM and run a command (defaults to `/bin/sh`) |
-| `shuru init [--force]` | Download or update OS image assets |
-| `shuru upgrade` | Upgrade shuru to the latest release |
+Checkpoints save the disk state so you can reuse an environment across runs.
 
-### `shuru run` flags
+```sh
+# Set up an environment and save it
+shuru checkpoint create myenv -- sh -c 'apk add python3 gcc'
 
-| Flag | Description |
-|------|-------------|
-| `--allow-net` | Enable network access (NAT). Disabled by default. |
-| `--cpus N` | Number of CPU cores (default: 2) |
-| `--memory MB` | Memory in megabytes (default: 2048) |
-| `--config PATH` | Path to config file (default: `./shuru.json`) |
-| `--console` | Attach to raw serial console instead of running a command (for debugging) |
-| `--kernel PATH` | Path to kernel image (env: `SHURU_KERNEL`) |
-| `--rootfs PATH` | Path to rootfs ext4 image (env: `SHURU_ROOTFS`) |
-| `--initrd PATH` | Path to initramfs (env: `SHURU_INITRD`) |
+# Run from a checkpoint (ephemeral -- changes are discarded)
+shuru run --from myenv -- python3 script.py
 
-## Config file
+# Branch from an existing checkpoint
+shuru checkpoint create myenv2 --from myenv -- sh -c 'pip install numpy'
 
-Shuru looks for a `shuru.json` in the current directory (or at the path given by `--config`). All fields are optional:
+# List and delete
+shuru checkpoint list
+shuru checkpoint delete myenv
+```
+
+### Config file
+
+Shuru loads `shuru.json` from the current directory (or `--config PATH`). All fields are optional; CLI flags take precedence.
 
 ```json
 {
   "cpus": 4,
   "memory": 4096,
+  "disk_size": 8192,
   "allow_net": true,
   "command": ["python", "script.py"]
 }
 ```
-
-Resolution order per field: **CLI flag > config file > default**.
 
 ## Architecture
 
@@ -91,76 +83,6 @@ Resolution order per field: **CLI flag > config file > default**.
 │               └────────────────┘            │
 │  Alpine Linux 3.21 / linux-virt 6.12        │
 └─────────────────────────────────────────────┘
-```
-
-Shuru is a Rust workspace with four crates:
-
-| Crate | Role |
-|-------|------|
-| **shuru-cli** | CLI binary (`shuru`). Parses flags/config, manages assets, drives the VM lifecycle. |
-| **shuru-vm** | High-level sandbox API. Builds VM configuration, exposes `exec()` (piped) and `shell()` (interactive PTY) over vsock. |
-| **shuru-darwin** | Low-level Objective-C bindings to Apple's Virtualization.framework via `objc2`. |
-| **shuru-guest** | PID 1 init for the guest VM. Cross-compiled to `aarch64-unknown-linux-musl`. Handles vsock protocol, process spawning, and PTY allocation. |
-
-### Boot sequence
-
-1. **Kernel** -- Alpine `linux-virt` (ARM64, uncompressed `Image`). VirtIO core drivers are built-in.
-2. **Initramfs** -- Loads kernel modules that are not built-in (`virtio_blk`, `ext4`, `af_packet`, `virtio_net`, `vsock`, etc.), waits for `/dev/vda`, mounts the rootfs, runs DHCP on `eth0` if a network device is present, then `switch_root` into the rootfs.
-3. **Rootfs** -- A 512 MB ext4 image containing Alpine minirootfs. `shuru-guest` is installed at `/usr/bin/shuru-init` and runs as PID 1.
-4. **Guest init** -- Mounts filesystems (`proc`, `sysfs`, `devtmpfs`, `devpts`, `tmpfs`), sets hostname to `shuru`, then listens for vsock connections on port 1024.
-
-### Sandbox permissions
-
-Sandboxes are locked down by default. Permissions are opt-in:
-
-| Permission | Flag | Default | Effect |
-|------------|------|---------|--------|
-| Network | `--allow-net` | off | Attaches a VirtIO NIC with NAT to the VM |
-
-Without `--allow-net`, no network device is attached to the VM -- the guest has no `eth0` and cannot make any outbound connections.
-
-### Networking
-
-When `--allow-net` is set, Shuru attaches a VirtIO network device with a NAT attachment (via `VZNATNetworkDeviceAttachment`). macOS handles all routing transparently.
-
-DHCP runs in the initramfs before `switch_root`, avoiding timing races with the host NAT attachment. After loading the `af_packet` and `virtio_net` kernel modules, the initramfs runs `udhcpc` (busybox) which configures the IP, gateway, and writes DNS to the rootfs `/etc/resolv.conf`. By the time `shuru-guest` starts as PID 1, `eth0` already has an IP.
-
-If `eth0` doesn't exist (no `--allow-net`), network setup is silently skipped.
-
-### Host-guest communication (vsock)
-
-All command execution goes over a VirtIO socket (vsock) on port 1024, using a JSON-lines protocol:
-
-**Host -> Guest** (exec request):
-```json
-{"argv": ["/bin/sh", "-c", "echo hello"], "env": {}, "tty": true, "rows": 24, "cols": 80}
-```
-
-**Guest -> Host** (streamed responses):
-```json
-{"type": "stdout", "data": "hello\n"}
-{"type": "exit", "code": 0}
-```
-
-**Interactive mode** -- when stdin is a TTY, the host puts the terminal in raw mode and relays keystrokes as `{"type": "stdin", "data": "..."}` messages. The guest allocates a PTY (`openpty`) and handles window resize (`{"type": "resize", "rows": 24, "cols": 80}`) via `TIOCSWINSZ`.
-
-## Development
-
-```sh
-# Build the guest init (needs aarch64-linux-musl-gcc cross-compiler)
-cargo build -p shuru-guest --target aarch64-unknown-linux-musl --release
-
-# Prepare rootfs, kernel, and initramfs (needs Docker)
-./scripts/prepare-rootfs.sh
-
-# Build the CLI
-cargo build -p shuru-cli
-
-# Codesign (required for Virtualization.framework entitlement)
-codesign --entitlements shuru.entitlements --force -s - target/debug/shuru
-
-# Run
-./target/debug/shuru run -- echo hello
 ```
 
 ## Bugs
