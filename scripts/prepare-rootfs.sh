@@ -213,8 +213,8 @@ fi
 echo "initramfs: mounting /dev/vda..."
 /bin/mount -t ext4 /dev/vda /newroot
 
-if [ ! -x /newroot/sbin/init ]; then
-    echo "initramfs: ERROR - /sbin/init not found on root!"
+if [ ! -x /newroot/usr/bin/shuru-init ]; then
+    echo "initramfs: ERROR - /usr/bin/shuru-init not found on root!"
     ls -la /newroot/sbin/ 2>/dev/null
     exec /bin/sh
 fi
@@ -223,7 +223,7 @@ echo "initramfs: switching to real root..."
 /bin/umount /proc
 /bin/umount /sys
 /bin/umount /dev
-exec /bin/switch_root /newroot /sbin/init
+exec /bin/switch_root /newroot /usr/bin/shuru-init
 INITEOF
             chmod 755 /initramfs/init
 
@@ -264,8 +264,8 @@ if [[ "$(uname)" == "Darwin" ]]; then
             mkdir -p /mnt/rootfs
             mount -o loop /rootfs.ext4 /mnt/rootfs
             tar xzf /workdir/rootfs.tar.gz -C /mnt/rootfs
-            cp /workdir/shuru-guest /mnt/rootfs/sbin/init
-            chmod 755 /mnt/rootfs/sbin/init
+            cp /workdir/shuru-guest /mnt/rootfs/usr/bin/shuru-init
+            chmod 755 /mnt/rootfs/usr/bin/shuru-init
             mkdir -p /mnt/rootfs/proc /mnt/rootfs/sys /mnt/rootfs/dev /mnt/rootfs/tmp /mnt/rootfs/run
             echo "shuru" > /mnt/rootfs/etc/hostname
             echo "nameserver 8.8.8.8" > /mnt/rootfs/etc/resolv.conf
@@ -283,8 +283,8 @@ else
     MOUNT_DIR=$(mktemp -d)
     sudo mount -o loop "$ROOTFS_IMG" "$MOUNT_DIR"
     sudo tar xzf "$MINIROOTFS_TAR" -C "$MOUNT_DIR"
-    sudo cp "$GUEST_BINARY" "${MOUNT_DIR}/sbin/init"
-    sudo chmod 755 "${MOUNT_DIR}/sbin/init"
+    sudo cp "$GUEST_BINARY" "${MOUNT_DIR}/usr/bin/shuru-init"
+    sudo chmod 755 "${MOUNT_DIR}/usr/bin/shuru-init"
     sudo mkdir -p "${MOUNT_DIR}/proc" "${MOUNT_DIR}/sys" "${MOUNT_DIR}/dev" "${MOUNT_DIR}/tmp" "${MOUNT_DIR}/run"
     echo "shuru" | sudo tee "${MOUNT_DIR}/etc/hostname" > /dev/null
     echo "nameserver 8.8.8.8" | sudo tee "${MOUNT_DIR}/etc/resolv.conf" > /dev/null
