@@ -31,7 +31,7 @@ pub(crate) fn create(
     std::fs::copy(&prepared.work_rootfs, &checkpoint_path)?;
     eprintln!("shuru: checkpoint '{}' saved", name);
 
-    let _ = std::fs::remove_file(&prepared.work_rootfs);
+    let _ = std::fs::remove_dir_all(&prepared.instance_dir);
     Ok(exit_code)
 }
 

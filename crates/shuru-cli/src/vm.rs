@@ -11,6 +11,7 @@ use crate::config::ShuruConfig;
 
 pub(crate) struct PreparedVm {
     pub data_dir: String,
+    pub instance_dir: String,
     pub work_rootfs: String,
     pub kernel_path: String,
     pub initrd_path: Option<String>,
@@ -83,8 +84,10 @@ pub(crate) fn prepare_vm(
         }
     };
 
-    // Create working copy (CoW clone on APFS — near-instant)
-    let work_rootfs = format!("{}/rootfs-work.ext4", data_dir);
+    // Create per-instance working copy (CoW clone on APFS — near-instant)
+    let instance_dir = format!("{}/instances/{}", data_dir, std::process::id());
+    std::fs::create_dir_all(&instance_dir)?;
+    let work_rootfs = format!("{}/rootfs.ext4", instance_dir);
     eprintln!("shuru: creating working copy...");
     std::fs::copy(&source, &work_rootfs)?;
 
@@ -107,6 +110,7 @@ pub(crate) fn prepare_vm(
 
     Ok(PreparedVm {
         data_dir,
+        instance_dir,
         work_rootfs,
         kernel_path,
         initrd_path,

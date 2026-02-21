@@ -50,7 +50,7 @@ fn main() -> Result<()> {
                 vm::run_command(&prepared, &command)?
             };
 
-            let _ = std::fs::remove_file(&prepared.work_rootfs);
+            let _ = std::fs::remove_dir_all(&prepared.instance_dir);
             process::exit(exit_code);
         }
         Commands::Init { force } => {
@@ -70,6 +70,39 @@ fn main() -> Result<()> {
         Commands::Upgrade => {
             let data_dir = default_data_dir();
             assets::upgrade(&data_dir)?;
+        }
+        Commands::Prune => {
+            let data_dir = default_data_dir();
+            let instances_dir = format!("{}/instances", data_dir);
+            let entries = match std::fs::read_dir(&instances_dir) {
+                Ok(entries) => entries,
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                    eprintln!("shuru: no orphaned instances found");
+                    return Ok(());
+                }
+                Err(e) => return Err(e.into()),
+            };
+
+            let mut removed = 0u32;
+            for entry in entries {
+                let entry = entry?;
+                let name = entry.file_name();
+                let Some(pid) = name.to_str().and_then(|s| s.parse::<i32>().ok()) else {
+                    continue;
+                };
+                // Check if the process is still running
+                let alive = unsafe { libc::kill(pid, 0) } == 0;
+                if !alive {
+                    std::fs::remove_dir_all(entry.path())?;
+                    removed += 1;
+                }
+            }
+
+            if removed == 0 {
+                eprintln!("shuru: no orphaned instances found");
+            } else {
+                eprintln!("shuru: removed {} orphaned instance(s)", removed);
+            }
         }
         Commands::Checkpoint { action } => match action {
             CheckpointCommands::Create {

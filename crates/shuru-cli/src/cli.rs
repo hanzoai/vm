@@ -77,6 +77,9 @@ pub(crate) enum Commands {
         #[command(subcommand)]
         action: CheckpointCommands,
     },
+
+    /// Remove leftover instance data from crashed VMs
+    Prune,
 }
 
 #[derive(clap::Subcommand)]
