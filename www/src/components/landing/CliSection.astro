@@ -44,12 +44,22 @@
         </a>
         <a
           href="#checkpoints"
-          class="cli-tab block p-5 md:p-6"
+          class="cli-tab block border-b border-border p-5 md:p-6"
           data-hash="checkpoints"
         >
           <h3 class="text-sm font-semibold">Checkpoint & restore</h3>
           <p class="mt-1 text-xs leading-relaxed text-muted">
             Save environments as snapshots. Branch and reuse across runs.
+          </p>
+        </a>
+        <a
+          href="#port-forwarding"
+          class="cli-tab block p-5 md:p-6"
+          data-hash="port-forwarding"
+        >
+          <h3 class="text-sm font-semibold">Port forwarding</h3>
+          <p class="mt-1 text-xs leading-relaxed text-muted">
+            Expose guest ports to the host. Works without network access.
           </p>
         </a>
       </div>
@@ -101,6 +111,17 @@
             <br />
             <p class="text-muted"># Restore any checkpoint instantly. Branch and reuse.</p>
           </div>
+
+          <div class="cli-panel p-5 font-mono text-xs leading-[1.8] md:p-6 md:text-sm" data-hash="port-forwarding">
+            <p><span class="text-dim">$</span> <span class="text-text">shuru run -p 8080:8000 -- python3 -m http.server 8000</span></p>
+            <p class="text-amber">shuru: forwarding 127.0.0.1:8080 -> guest:8000</p>
+            <br />
+            <p><span class="text-dim">$</span> <span class="text-text">curl http://127.0.0.1:8080/</span></p>
+            <p class="text-amber">&lt;!DOCTYPE HTML&gt;</p>
+            <p class="text-amber">&lt;html&gt;&lt;title&gt;Directory listing&lt;/title&gt;...</p>
+            <br />
+            <p class="text-muted"># No --allow-net needed. Tunneled over vsock.</p>
+          </div>
         </div>
       </div>
     </div>
@@ -141,7 +162,7 @@
 </style>
 
 <script>
-  const VALID_HASHES = ['ephemeral-runs', 'networking', 'resources', 'checkpoints'];
+  const VALID_HASHES = ['ephemeral-runs', 'networking', 'resources', 'checkpoints', 'port-forwarding'];
   const DEFAULT_HASH = 'ephemeral-runs';
 
   function activate(hash: string) {
