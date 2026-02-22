@@ -113,12 +113,14 @@
           </div>
 
           <div class="cli-panel p-5 font-mono text-xs leading-[1.8] md:p-6 md:text-sm" data-hash="port-forwarding">
-            <p><span class="text-dim">$</span> <span class="text-text">shuru run -p 8080:8000 -- python3 -m http.server 8000</span></p>
+            <p><span class="text-dim">$</span> <span class="text-text">shuru checkpoint create py --allow-net -- apk add python3</span></p>
+            <p class="text-amber">shuru: checkpoint 'py' saved</p>
+            <br />
+            <p><span class="text-dim">$</span> <span class="text-text">shuru run --from py -p 8080:8000 -- python3 -m http.server 8000</span></p>
             <p class="text-amber">shuru: forwarding 127.0.0.1:8080 -> guest:8000</p>
             <br />
             <p><span class="text-dim">$</span> <span class="text-text">curl http://127.0.0.1:8080/</span></p>
-            <p class="text-amber">&lt;!DOCTYPE HTML&gt;</p>
-            <p class="text-amber">&lt;html&gt;&lt;title&gt;Directory listing&lt;/title&gt;...</p>
+            <p class="text-amber">&lt;!DOCTYPE HTML&gt;...</p>
             <br />
             <p class="text-muted"># No --allow-net needed. Tunneled over vsock.</p>
           </div>

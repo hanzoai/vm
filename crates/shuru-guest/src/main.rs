@@ -452,7 +452,10 @@ mod guest {
 
                 libc::execvp(c_argv[0], c_argv.as_ptr());
 
-                // If execvp returns, it failed
+                // If execvp returns, it failed - print error to the PTY
+                let err = std::io::Error::last_os_error();
+                let msg = format!("shuru: {}: {}\n", req.argv[0], err);
+                libc::write(2, msg.as_ptr() as *const libc::c_void, msg.len());
                 libc::_exit(127);
             }
 
