@@ -56,6 +56,9 @@
   copyBtn?.addEventListener("click", async () => {
     const text = "curl -fsSL https://shuru.run/install.sh | sh";
     await navigator.clipboard.writeText(text);
+    if (window.umami && typeof window.umami.track === "function") {
+      window.umami.track("install-command-copied");
+    }
     copyIcon?.classList.add("hidden");
     checkIcon?.classList.remove("hidden");
     setTimeout(() => {
