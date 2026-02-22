@@ -23,6 +23,19 @@ const { title, description = "Local-first microVM sandbox for AI agents on macOS
       href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap"
       rel="stylesheet"
     />
+    <!-- Open Graph -->
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content={title} />
+    <meta property="og:description" content={description} />
+    <meta property="og:image" content="https://shuru.run/og.png" />
+    <meta property="og:url" content="https://shuru.run" />
+
+    <!-- Twitter -->
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content={title} />
+    <meta name="twitter:description" content={description} />
+    <meta name="twitter:image" content="https://shuru.run/og.png" />
+
     <title>{title}</title>
   </head>
   <body class="min-h-screen bg-bg text-text antialiased">
