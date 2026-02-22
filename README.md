@@ -35,14 +35,15 @@ shuru run --cpus 4 --memory 4096 --disk-size 8192 -- make -j4
 Forward host ports to guest ports over vsock. Works without `--allow-net` — the guest needs no network device.
 
 ```sh
-# Forward host:8080 → guest:8000
-shuru run -p 8080:8000 -- python3 -m http.server 8000
+# Install python3 into a checkpoint, then serve with port forwarding
+shuru checkpoint create py --allow-net -- apk add python3
+shuru run --from py -p 8080:8000 -- python3 -m http.server 8000
+
+# From the host (in another terminal)
+curl http://127.0.0.1:8080/
 
 # Multiple ports
 shuru run -p 8080:80 -p 8443:443 -- nginx
-
-# From the host
-curl http://127.0.0.1:8080/
 ```
 
 Port forwards can also be set in `shuru.json` (see [Config file](#config-file)).

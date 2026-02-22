@@ -661,25 +661,42 @@ mod guest {
         }
     }
 
-    fn handle_forward_connection(fd: i32) {
-        let stream = unsafe { std::net::TcpStream::from_raw_fd(fd) };
-        let mut reader = BufReader::new(stream.try_clone().expect("clone vsock stream"));
-        let mut writer = stream;
-
-        // Read the forward request (one JSON line)
-        let mut line = String::new();
-        if reader.read_line(&mut line).is_err() || line.trim().is_empty() {
-            return;
+    /// Read one line from a stream byte-by-byte, without buffering past the newline.
+    fn read_line_raw(stream: &mut std::net::TcpStream) -> Option<String> {
+        let mut buf = Vec::new();
+        let mut byte = [0u8; 1];
+        loop {
+            match stream.read(&mut byte) {
+                Ok(0) => return None,
+                Ok(_) => {
+                    if byte[0] == b'\n' {
+                        break;
+                    }
+                    buf.push(byte[0]);
+                }
+                Err(_) => return None,
+            }
         }
+        String::from_utf8(buf).ok()
+    }
 
-        let req: ForwardRequest = match serde_json::from_str(line.trim()) {
+    fn handle_forward_connection(fd: i32) {
+        let mut stream = unsafe { std::net::TcpStream::from_raw_fd(fd) };
+
+        // Read the forward request byte-by-byte to avoid buffering past newline
+        let line = match read_line_raw(&mut stream) {
+            Some(l) if !l.is_empty() => l,
+            _ => return,
+        };
+
+        let req: ForwardRequest = match serde_json::from_str(&line) {
             Ok(r) => r,
             Err(e) => {
                 let resp = ForwardResponse {
                     status: "error".into(),
                     message: Some(format!("invalid request: {}", e)),
                 };
-                let _ = writeln!(writer, "{}", serde_json::to_string(&resp).unwrap());
+                let _ = writeln!(stream, "{}", serde_json::to_string(&resp).unwrap());
                 return;
             }
         };
@@ -688,11 +705,12 @@ mod guest {
         let tcp_stream = match std::net::TcpStream::connect(("127.0.0.1", req.port)) {
             Ok(s) => s,
             Err(e) => {
+                eprintln!("shuru-guest: forward to port {} failed: {}", req.port, e);
                 let resp = ForwardResponse {
                     status: "error".into(),
                     message: Some(format!("connection refused: {}", e)),
                 };
-                let _ = writeln!(writer, "{}", serde_json::to_string(&resp).unwrap());
+                let _ = writeln!(stream, "{}", serde_json::to_string(&resp).unwrap());
                 return;
             }
         };
@@ -702,13 +720,13 @@ mod guest {
             status: "ok".into(),
             message: None,
         };
-        if writeln!(writer, "{}", serde_json::to_string(&resp).unwrap()).is_err() {
+        if writeln!(stream, "{}", serde_json::to_string(&resp).unwrap()).is_err() {
             return;
         }
-        let _ = writer.flush();
+        let _ = stream.flush();
 
         // Bidirectional relay between vsock and TCP
-        forward_relay(writer, tcp_stream);
+        forward_relay(stream, tcp_stream);
     }
 
     fn forward_relay(vsock: std::net::TcpStream, tcp: std::net::TcpStream) {

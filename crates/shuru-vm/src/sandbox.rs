@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::io::{BufRead, BufReader, Write};
+use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{Shutdown, TcpListener, TcpStream};
 use std::os::fd::AsRawFd;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -376,10 +376,13 @@ impl Sandbox {
                 while !stop_flag.load(Ordering::Relaxed) {
                     match tcp_listener.accept() {
                         Ok((tcp_stream, _)) => {
+                            // macOS accept() inherits non-blocking from the
+                            // listener — force blocking for the relay.
+                            let _ = tcp_stream.set_nonblocking(false);
                             let vm = Arc::clone(&vm);
                             std::thread::spawn(move || {
                                 if let Err(e) = handle_forward_connection(tcp_stream, &vm, guest_port) {
-                                    tracing::debug!("port forward connection error: {}", e);
+                                    eprintln!("shuru: port forward error: {}", e);
                                 }
                             });
                         }
@@ -442,20 +445,18 @@ fn handle_forward_connection(
     vm: &VirtualMachine,
     guest_port: u16,
 ) -> Result<()> {
-    let vsock_stream = vm
+    let mut vsock_stream = vm
         .connect_to_vsock_port(VSOCK_PORT_FORWARD)
         .map_err(|e| anyhow::anyhow!("vsock connect for port forward: {}", e))?;
 
     // Send forward request
-    let mut vsock_writer = vsock_stream.try_clone()?;
     let req = ForwardRequest { port: guest_port };
-    writeln!(vsock_writer, "{}", serde_json::to_string(&req)?)?;
-    vsock_writer.flush()?;
+    writeln!(vsock_stream, "{}", serde_json::to_string(&req)?)?;
+    vsock_stream.flush()?;
 
-    // Read response
-    let mut vsock_reader = BufReader::new(vsock_stream.try_clone()?);
-    let mut line = String::new();
-    vsock_reader.read_line(&mut line)?;
+    // Read response - byte-by-byte to avoid buffering past the newline
+    let line = read_line_raw(&mut vsock_stream)
+        .context("reading forward response")?;
     let resp: ForwardResponse =
         serde_json::from_str(line.trim()).context("parsing forward response")?;
 
@@ -469,6 +470,26 @@ fn handle_forward_connection(
     // Bidirectional relay between TCP and vsock
     relay(tcp_stream, vsock_stream);
     Ok(())
+}
+
+/// Read one line from a stream without any buffering beyond the newline.
+/// This prevents a BufReader from consuming bytes that belong to the relay phase.
+fn read_line_raw(stream: &mut TcpStream) -> Result<String> {
+    let mut buf = Vec::new();
+    let mut byte = [0u8; 1];
+    loop {
+        match stream.read(&mut byte) {
+            Ok(0) => bail!("unexpected EOF"),
+            Ok(_) => {
+                if byte[0] == b'\n' {
+                    break;
+                }
+                buf.push(byte[0]);
+            }
+            Err(e) => return Err(e.into()),
+        }
+    }
+    Ok(String::from_utf8(buf)?)
 }
 
 fn relay(a: TcpStream, b: TcpStream) {
