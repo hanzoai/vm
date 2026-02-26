@@ -30,6 +30,22 @@ shuru run --allow-net
 shuru run --cpus 4 --memory 4096 --disk-size 8192 -- make -j4
 ```
 
+### Directory mounts
+
+Share host directories into the VM using VirtioFS. The host directory is read-only; guest writes go to a tmpfs overlay layer (discarded when the VM exits).
+
+```sh
+# Mount a directory (guest can write, host is untouched)
+shuru run --mount ./src:/workspace -- ls /workspace
+
+# Multiple mounts
+shuru run --mount ./src:/workspace --mount ./data:/data -- sh
+```
+
+Mounts can also be set in `shuru.json` (see [Config file](#config-file)).
+
+> **Note:** Directory mounts require checkpoints created on v0.1.11+. Existing checkpoints work normally for all other features. Run `shuru upgrade` to get the latest version.
+
 ### Port forwarding
 
 Forward host ports to guest ports over vsock. Works without `--allow-net` — the guest needs no network device.
@@ -78,6 +94,7 @@ Shuru loads `shuru.json` from the current directory (or `--config PATH`). All fi
   "disk_size": 8192,
   "allow_net": true,
   "ports": ["8080:80"],
+  "mounts": ["./src:/workspace", "./data:/data"],
   "command": ["python", "script.py"]
 }
 ```
@@ -94,6 +111,7 @@ Shuru loads `shuru.json` from the current directory (or `--config PATH`). All fi
 │         ┌────────┼─────────┐                │
 │         │ vsock :1024 exec │                │
 │         │ vsock :1025 fwd  │                │
+│         │ virtiofs  mounts │                │
 │         └────────┼─────────┘                │
 ├──────────────────┼──────────────────────────┤
 │  Linux Guest     │                          │

@@ -3,7 +3,7 @@ use std::io::IsTerminal;
 
 use anyhow::{bail, Context, Result};
 
-use shuru_vm::{PortMapping, Sandbox};
+use shuru_vm::{MountConfig, PortMapping, Sandbox};
 
 use crate::assets;
 use crate::cli::VmArgs;
@@ -20,6 +20,7 @@ pub(crate) struct PreparedVm {
     pub disk_size: u64,
     pub allow_net: bool,
     pub forwards: Vec<PortMapping>,
+    pub mounts: Vec<MountConfig>,
 }
 
 /// Resolve config, create a CoW working copy of the rootfs, and extend it to disk_size.
@@ -45,6 +46,20 @@ pub(crate) fn prepare_vm(
         let mapping = parse_port_mapping(s)
             .with_context(|| format!("invalid port mapping: '{}'", s))?;
         forwards.push(mapping);
+    }
+
+    // Merge mounts: CLI flags + config file
+    let mut mount_strs: Vec<&str> = vm.mount.iter().map(|s| s.as_str()).collect();
+    if let Some(ref cfg_mounts) = cfg.mounts {
+        for m in cfg_mounts {
+            mount_strs.push(m.as_str());
+        }
+    }
+    let mut mounts = Vec::new();
+    for s in &mount_strs {
+        let mc = parse_mount_spec(s)
+            .with_context(|| format!("invalid mount spec: '{}'", s))?;
+        mounts.push(mc);
     }
 
     let data_dir = shuru_vm::default_data_dir();
@@ -134,6 +149,7 @@ pub(crate) fn prepare_vm(
         disk_size,
         allow_net,
         forwards,
+        mounts,
     })
 }
 
@@ -159,6 +175,11 @@ pub(crate) fn run_command(prepared: &PreparedVm, command: &[String]) -> Result<i
         builder = builder.initrd(initrd);
     }
 
+    for m in &prepared.mounts {
+        eprintln!("shuru: mount {} -> {}", m.host_path, m.guest_path);
+        builder = builder.mount(m.clone());
+    }
+
     let sandbox = builder.build()?;
     eprintln!("shuru: VM created and validated successfully");
 
@@ -181,6 +202,29 @@ pub(crate) fn run_command(prepared: &PreparedVm, command: &[String]) -> Result<i
 
     let _ = sandbox.stop();
     Ok(exit_code)
+}
+
+/// Parse a "HOST:GUEST" mount spec string.
+fn parse_mount_spec(s: &str) -> Result<MountConfig> {
+    let parts: Vec<&str> = s.splitn(2, ':').collect();
+    if parts.len() < 2 {
+        bail!("expected HOST:GUEST format (e.g. ./src:/workspace)");
+    }
+
+    let host_path = std::fs::canonicalize(parts[0])
+        .with_context(|| format!("host path does not exist: '{}'", parts[0]))?
+        .to_string_lossy()
+        .to_string();
+
+    let guest_path = parts[1].to_string();
+    if !guest_path.starts_with('/') {
+        bail!("guest path must be absolute (start with /): '{}'", guest_path);
+    }
+
+    Ok(MountConfig {
+        host_path,
+        guest_path,
+    })
 }
 
 /// Parse a "HOST:GUEST" port mapping string.

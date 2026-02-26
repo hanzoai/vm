@@ -194,7 +194,10 @@ DHCPEOF
                 kernel/drivers/virtio/virtio_mmio.ko* \
                 kernel/net/vmw_vsock/vsock_loopback.ko* \
                 kernel/net/vmw_vsock/vsock_diag.ko* \
-                kernel/net/packet/af_packet.ko*; do
+                kernel/net/packet/af_packet.ko* \
+                kernel/fs/fuse/fuse.ko* \
+                kernel/fs/fuse/virtiofs.ko* \
+                kernel/fs/overlayfs/overlay.ko*; do
                 for f in /lib/modules/${KVER}/${mod}; do
                     if [ -f "${f}" ]; then
                         dest_dir="/initramfs/lib/modules/${KVER}/$(dirname ${mod})"
@@ -227,7 +230,7 @@ DHCPEOF
 /bin/mount -t devtmpfs none /dev
 
 echo "initramfs: loading modules..."
-for mod in virtio_blk crc32c_generic libcrc32c jbd2 mbcache ext4 af_packet virtio_net vsock vmw_vsock_virtio_transport_common vmw_vsock_virtio_transport; do
+for mod in virtio_blk crc32c_generic libcrc32c jbd2 mbcache ext4 af_packet virtio_net vsock vmw_vsock_virtio_transport_common vmw_vsock_virtio_transport fuse virtiofs overlay; do
     /bin/modprobe ${mod} 2>/dev/null && echo "  loaded: ${mod}" || echo "  FAILED: ${mod}"
 done
 

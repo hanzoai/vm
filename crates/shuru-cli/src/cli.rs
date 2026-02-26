@@ -34,6 +34,10 @@ pub(crate) struct VmArgs {
     #[arg(short = 'p', long = "port", value_name = "HOST:GUEST")]
     pub port: Vec<String>,
 
+    /// Mount a host directory into the VM (HOST:GUEST)
+    #[arg(long = "mount", value_name = "HOST:GUEST")]
+    pub mount: Vec<String>,
+
     /// Path to config file (default: ./shuru.json)
     #[arg(long)]
     pub config: Option<String>,

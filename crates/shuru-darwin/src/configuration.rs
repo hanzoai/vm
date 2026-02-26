@@ -1,6 +1,7 @@
 use objc2::rc::{Id, Shared};
 
 use crate::bootloader::LinuxBootLoader;
+use crate::directory_sharing::VirtioFileSystemDevice;
 use crate::entropy::VirtioEntropyDevice;
 use crate::error::{Result, VzError};
 use crate::memory::VirtioMemoryBalloonDevice;
@@ -91,6 +92,17 @@ impl VirtualMachineConfiguration {
         let array = NSArray::from_vec(ids);
         unsafe {
             self.inner.setSocketDevices(&array);
+        }
+    }
+
+    pub fn set_directory_sharing_devices(&self, devices: &[VirtioFileSystemDevice]) {
+        let ids = devices
+            .iter()
+            .map(|d| d.as_directory_sharing_config())
+            .collect();
+        let array = NSArray::from_vec(ids);
+        unsafe {
+            self.inner.setDirectorySharingDevices(&array);
         }
     }
 

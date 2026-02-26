@@ -53,3 +53,21 @@ pub struct ForwardResponse {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub message: Option<String>,
 }
+
+// --- Mount protocol ---
+
+/// Sent by the host over vsock to instruct the guest to mount a virtiofs device.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MountRequest {
+    pub tag: String,
+    pub guest_path: String,
+}
+
+/// Sent by the guest in response to a MountRequest.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MountResponse {
+    pub tag: String,
+    pub ok: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}

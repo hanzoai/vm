@@ -3,6 +3,7 @@ extern "C" {}
 
 mod vz_bootloader;
 mod vz_configuration;
+mod vz_directory_sharing;
 mod vz_memory_configuration;
 mod vz_memory_devices;
 mod vz_network_attachments;
@@ -18,6 +19,7 @@ mod vz_storage_configurations;
 
 pub(crate) use self::vz_bootloader::*;
 pub(crate) use self::vz_configuration::*;
+pub(crate) use self::vz_directory_sharing::*;
 pub(crate) use self::vz_memory_configuration::*;
 // pub(crate) use self::vz_memory_devices::*;
 pub(crate) use self::vz_network_attachments::*;
