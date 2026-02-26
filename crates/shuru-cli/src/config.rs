@@ -8,6 +8,7 @@ pub(crate) struct ShuruConfig {
     pub disk_size: Option<u64>,
     pub allow_net: Option<bool>,
     pub ports: Option<Vec<String>>,
+    pub mounts: Option<Vec<String>>,
     pub command: Option<Vec<String>>,
 }
 

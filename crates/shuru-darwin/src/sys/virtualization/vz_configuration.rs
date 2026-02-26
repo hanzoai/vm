@@ -71,13 +71,11 @@ extern_methods!(
             console_devices: &NSArray<VZConsoleDeviceConfiguration>,
         );
 
-        #[cfg(feature = "not_implemented_yet")]
         #[method_id(@__retain_semantics Other directorySharingDevices)]
         pub unsafe fn directorySharingDevices(
             &self,
-        ) -> Id<NSArray<VZDirectorySharingDeviceConfiguration>>;
+        ) -> Id<NSArray<VZDirectorySharingDeviceConfiguration>, Shared>;
 
-        #[cfg(feature = "not_implemented_yet")]
         #[method(setDirectorySharingDevices:)]
         pub unsafe fn setDirectorySharingDevices(
             &self,

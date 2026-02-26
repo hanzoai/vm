@@ -12,8 +12,19 @@ use crossbeam_channel::Receiver;
 use shuru_darwin::terminal;
 use shuru_darwin::*;
 
-use crate::proto::{ControlMessage, ExecRequest, ExecResponse, ForwardRequest, ForwardResponse, PortMapping};
+use crate::proto::{
+    ControlMessage, ExecRequest, ExecResponse, ForwardRequest, ForwardResponse, MountRequest,
+    MountResponse, PortMapping,
+};
 use crate::{VSOCK_PORT, VSOCK_PORT_FORWARD};
+
+// --- Mount types ---
+
+#[derive(Debug, Clone)]
+pub struct MountConfig {
+    pub host_path: String,
+    pub guest_path: String,
+}
 
 // --- VmConfigBuilder ---
 
@@ -25,6 +36,7 @@ pub struct VmConfigBuilder {
     memory_mb: u64,
     console: bool,
     allow_net: bool,
+    mounts: Vec<MountConfig>,
 }
 
 impl VmConfigBuilder {
@@ -37,6 +49,7 @@ impl VmConfigBuilder {
             memory_mb: 2048,
             console: true,
             allow_net: false,
+            mounts: Vec::new(),
         }
     }
 
@@ -79,6 +92,12 @@ impl VmConfigBuilder {
         self
     }
 
+    /// Add a host directory mount (virtio-fs).
+    pub fn mount(mut self, config: MountConfig) -> Self {
+        self.mounts.push(config);
+        self
+    }
+
     pub fn build(self) -> Result<Sandbox> {
         let kernel_path = self.kernel.context("kernel path is required")?;
         let rootfs_path = self.rootfs.context("rootfs path is required")?;
@@ -91,6 +110,7 @@ impl VmConfigBuilder {
         if let Some(ref initrd) = self.initrd {
             boot_loader.set_initrd(initrd);
         }
+
         boot_loader.set_command_line("console=hvc0 root=/dev/vda rw");
 
         let memory_bytes = self.memory_mb * 1024 * 1024;
@@ -119,6 +139,26 @@ impl VmConfigBuilder {
             config.set_network_devices(&[net_device]);
         }
 
+        // Set up directory sharing devices (virtio-fs) and mount metadata
+        let mut fs_devices: Vec<VirtioFileSystemDevice> = Vec::new();
+        let mut mount_requests: Vec<MountRequest> = Vec::new();
+
+        for (i, m) in self.mounts.iter().enumerate() {
+            let tag = format!("mount{}", i);
+            // Host directory is always read-only from the VM side.
+            // Overlay mode uses tmpfs upper layer inside the guest.
+            let shared_dir = SharedDirectory::new(&m.host_path, true);
+            fs_devices.push(VirtioFileSystemDevice::new(&tag, &shared_dir));
+            mount_requests.push(MountRequest {
+                tag,
+                guest_path: m.guest_path.clone(),
+            });
+        }
+
+        if !fs_devices.is_empty() {
+            config.set_directory_sharing_devices(&fs_devices);
+        }
+
         let socket_device = VirtioSocketDevice::new();
         config.set_socket_devices(&[socket_device]);
 
@@ -131,6 +171,7 @@ impl VmConfigBuilder {
 
         Ok(Sandbox {
             vm: Arc::new(VirtualMachine::new(&config)),
+            mounts: Mutex::new(mount_requests),
         })
     }
 }
@@ -139,6 +180,7 @@ impl VmConfigBuilder {
 
 pub struct Sandbox {
     vm: Arc<VirtualMachine>,
+    mounts: Mutex<Vec<MountRequest>>,
 }
 
 impl Sandbox {
@@ -162,6 +204,39 @@ impl Sandbox {
         self.vm.state_channel()
     }
 
+    /// Send pending mount requests over an established vsock connection.
+    /// Drains the mount list so subsequent calls are no-ops.
+    fn send_mount_requests(
+        &self,
+        writer: &mut impl Write,
+        reader: &mut BufReader<TcpStream>,
+    ) -> Result<()> {
+        let mounts = std::mem::take(&mut *self.mounts.lock().unwrap());
+        for req in &mounts {
+            writeln!(writer, "{}", serde_json::to_string(req)?)?;
+            writer.flush()?;
+            let mut line = String::new();
+            reader
+                .read_line(&mut line)
+                .context("reading mount response")?;
+            let line = line.trim();
+            if line.is_empty() {
+                bail!("guest closed connection during mount init");
+            }
+            let resp: MountResponse =
+                serde_json::from_str(line).context("parsing mount response")?;
+            if !resp.ok {
+                bail!(
+                    "mount failed: {} -> {}: {}",
+                    req.tag,
+                    req.guest_path,
+                    resp.error.unwrap_or_else(|| "unknown error".into())
+                );
+            }
+        }
+        Ok(())
+    }
+
     /// Run a command non-interactively over vsock, streaming output to the
     /// provided writers. Returns the guest process exit code.
     pub fn exec(
@@ -171,9 +246,10 @@ impl Sandbox {
         stderr: &mut impl Write,
     ) -> Result<i32> {
         let stream = self.connect_vsock()?;
-
         let mut writer = stream.try_clone()?;
-        let reader = BufReader::new(stream);
+        let mut reader = BufReader::new(stream);
+
+        self.send_mount_requests(&mut writer, &mut reader)?;
 
         let req = ExecRequest {
             argv: argv.iter().map(|s| s.as_ref().to_string()).collect(),
@@ -238,9 +314,13 @@ impl Sandbox {
         let (rows, cols) = terminal::terminal_size(stdin_fd);
 
         let stream = self.connect_vsock()?;
+        let mut writer = stream.try_clone()?;
+        let mut reader = BufReader::new(stream);
+
+        // Mount phase (sync, before raw mode)
+        self.send_mount_requests(&mut writer, &mut reader)?;
 
         // Send ExecRequest with tty=true
-        let mut writer = stream.try_clone()?;
         let req = ExecRequest {
             argv: argv.iter().map(|s| s.as_ref().to_string()).collect(),
             env: env.clone(),
@@ -262,7 +342,7 @@ impl Sandbox {
 
         // Thread A: stdin → vsock (send stdin data + resize messages)
         let done_a = done.clone();
-        let mut vsock_writer = stream.try_clone()?;
+        let mut vsock_writer = writer.try_clone()?;
         let stdin_thread = std::thread::spawn(move || {
             let mut buf = [0u8; 4096];
 
@@ -297,7 +377,6 @@ impl Sandbox {
         // Thread B: vsock → stdout (read responses, write output)
         let done_b = done.clone();
         let exit_code_b = exit_code.clone();
-        let reader = BufReader::new(stream);
         let vsock_thread = std::thread::spawn(move || {
             let mut stdout = std::io::stdout();
             for line in reader.lines() {
@@ -409,7 +488,18 @@ impl Sandbox {
     }
 
     fn connect_vsock(&self) -> Result<TcpStream> {
+        let state_rx = self.vm.state_channel();
         for attempt in 1..=10 {
+            // Check if VM died (e.g. guest mount failure -> reboot POWER_OFF)
+            if let Ok(state) = state_rx.try_recv() {
+                match state {
+                    VmState::Stopped => {
+                        bail!("VM stopped during startup - check boot output above for errors")
+                    }
+                    VmState::Error => bail!("VM encountered an error during startup"),
+                    _ => {}
+                }
+            }
             match self.vm.connect_to_vsock_port(VSOCK_PORT) {
                 Ok(s) => return Ok(s),
                 Err(e) => {

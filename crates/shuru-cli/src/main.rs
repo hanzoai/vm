@@ -143,6 +143,11 @@ fn run_console(prepared: &vm::PreparedVm) -> Result<i32> {
         builder = builder.initrd(initrd);
     }
 
+    for m in &prepared.mounts {
+        eprintln!("shuru: mount {} -> {}", m.host_path, m.guest_path);
+        builder = builder.mount(m.clone());
+    }
+
     let sandbox = builder.build()?;
     eprintln!("shuru: VM created and validated successfully");
 

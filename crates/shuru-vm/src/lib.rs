@@ -3,8 +3,11 @@
 mod proto;
 mod sandbox;
 
-pub use proto::{ControlMessage, ExecRequest, ExecResponse, ForwardRequest, ForwardResponse, PortMapping};
-pub use sandbox::{PortForwardHandle, Sandbox, VmConfigBuilder};
+pub use proto::{
+    ControlMessage, ExecRequest, ExecResponse, ForwardRequest, ForwardResponse, MountRequest,
+    MountResponse, PortMapping,
+};
+pub use sandbox::{MountConfig, PortForwardHandle, Sandbox, VmConfigBuilder};
 
 // Re-exports from shuru-darwin for advanced/escape-hatch use
 pub use shuru_darwin::VirtualMachine;

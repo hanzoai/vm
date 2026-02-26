@@ -48,7 +48,17 @@ mod guest {
         Resize { rows: u16, cols: u16 },
     }
 
-    fn mount_fs(source: &str, target: &str, fstype: &str, data: Option<&str>) {
+    fn mount_fs(source: &str, target: &str, fstype: &str, data: Option<&str>) -> bool {
+        mount_fs_with_flags(source, target, fstype, 0, data)
+    }
+
+    fn mount_fs_with_flags(
+        source: &str,
+        target: &str,
+        fstype: &str,
+        flags: libc::c_ulong,
+        data: Option<&str>,
+    ) -> bool {
         use std::ffi::CString;
 
         let c_source = CString::new(source).unwrap();
@@ -61,7 +71,7 @@ mod guest {
                 c_source.as_ptr(),
                 c_target.as_ptr(),
                 c_fstype.as_ptr(),
-                0,
+                flags,
                 data_ptr
                     .as_ref()
                     .map_or(std::ptr::null(), |d| d.as_ptr() as *const libc::c_void),
@@ -74,7 +84,9 @@ mod guest {
                 target,
                 std::io::Error::last_os_error()
             );
+            return false;
         }
+        true
     }
 
     fn mount_filesystems() {
@@ -84,6 +96,81 @@ mod guest {
         std::fs::create_dir_all("/dev/pts").ok();
         mount_fs("devpts", "/dev/pts", "devpts", Some("newinstance,ptmxmode=0666"));
         mount_fs("tmpfs", "/tmp", "tmpfs", None);
+    }
+
+    // --- Mount protocol ---
+
+    #[derive(Deserialize)]
+    struct MountRequest {
+        tag: String,
+        guest_path: String,
+    }
+
+    #[derive(Serialize)]
+    struct MountResponse {
+        tag: String,
+        ok: bool,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        error: Option<String>,
+    }
+
+    fn process_mount(req: &MountRequest) -> MountResponse {
+        if let Err(e) = std::fs::create_dir_all(&req.guest_path) {
+            return MountResponse {
+                tag: req.tag.clone(),
+                ok: false,
+                error: Some(format!("failed to create mount point {}: {}", req.guest_path, e)),
+            };
+        }
+
+        match mount_overlay(&req.tag, &req.guest_path) {
+            Ok(()) => MountResponse {
+                tag: req.tag.clone(),
+                ok: true,
+                error: None,
+            },
+            Err(msg) => MountResponse {
+                tag: req.tag.clone(),
+                ok: false,
+                error: Some(msg),
+            },
+        }
+    }
+
+    fn mount_overlay(tag: &str, guest_path: &str) -> Result<(), String> {
+        let virtiofs_dir = format!("/mnt/.virtiofs/{}", tag);
+        let overlay_dir = format!("/mnt/.overlay/{}", tag);
+        let upper_dir = format!("{}/upper", overlay_dir);
+        let work_dir = format!("{}/work", overlay_dir);
+
+        std::fs::create_dir_all(&virtiofs_dir)
+            .and_then(|_| std::fs::create_dir_all(&upper_dir))
+            .and_then(|_| std::fs::create_dir_all(&work_dir))
+            .map_err(|e| format!("failed to create staging dirs: {}", e))?;
+
+        if !mount_fs(tag, &virtiofs_dir, "virtiofs", None) {
+            return Err(format!("failed to mount virtiofs device '{}'", tag));
+        }
+
+        if !mount_fs("tmpfs", &overlay_dir, "tmpfs", None) {
+            return Err(format!("failed to mount tmpfs for overlay on '{}'", tag));
+        }
+
+        // Re-create upper/work after tmpfs mount
+        std::fs::create_dir_all(&upper_dir)
+            .and_then(|_| std::fs::create_dir_all(&work_dir))
+            .map_err(|e| format!("failed to create overlay dirs after tmpfs: {}", e))?;
+
+        let overlay_opts = format!(
+            "lowerdir={},upperdir={},workdir={}",
+            virtiofs_dir, upper_dir, work_dir
+        );
+        if !mount_fs("overlay", guest_path, "overlay", Some(&overlay_opts)) {
+            return Err(format!("failed to mount overlay at {}", guest_path));
+        }
+
+        eprintln!("shuru-guest: mounted {} -> {} (overlay)", tag, guest_path);
+        Ok(())
     }
 
     fn bring_up_interface(sock: i32, name: &[u8]) {
@@ -246,20 +333,32 @@ mod guest {
     fn handle_connection(fd: i32) {
         // SAFETY: fd is a valid socket from accept()
         let stream = unsafe { std::net::TcpStream::from_raw_fd(fd) };
-        let reader = BufReader::new(stream.try_clone().expect("failed to clone stream"));
+        let mut reader = BufReader::new(stream.try_clone().expect("failed to clone stream"));
         let mut writer = stream;
+        let mut line_buf = String::new();
 
-        for line in reader.lines() {
-            let line = match line {
-                Ok(l) => l,
+        loop {
+            line_buf.clear();
+            match reader.read_line(&mut line_buf) {
+                Ok(0) => break,  // EOF
                 Err(_) => break,
-            };
-
+                Ok(_) => {}
+            }
+            let line = line_buf.trim();
             if line.is_empty() {
                 continue;
             }
 
-            let req: ExecRequest = match serde_json::from_str(&line) {
+            // Mount request: Handle inline, continue reading
+            if let Ok(mount_req) = serde_json::from_str::<MountRequest>(line) {
+                let resp = process_mount(&mount_req);
+                let _ = writeln!(writer, "{}", serde_json::to_string(&resp).unwrap());
+                let _ = writer.flush();
+                continue;
+            }
+
+            // Exec request
+            let req: ExecRequest = match serde_json::from_str(line) {
                 Ok(r) => r,
                 Err(e) => {
                     let resp = ExecResponse {
