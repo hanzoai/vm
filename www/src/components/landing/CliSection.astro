@@ -43,6 +43,16 @@
           </p>
         </a>
         <a
+          href="#mounts"
+          class="cli-tab block border-b border-border p-5 md:p-6"
+          data-hash="mounts"
+        >
+          <h3 class="text-sm font-semibold">Directory mounts</h3>
+          <p class="mt-1 text-xs leading-relaxed text-muted">
+            Share host directories into the VM. Writes stay in a tmpfs overlay.
+          </p>
+        </a>
+        <a
           href="#checkpoints"
           class="cli-tab block border-b border-border p-5 md:p-6"
           data-hash="checkpoints"
@@ -100,6 +110,16 @@
             <p><span class="text-dim">$</span> <span class="text-text">shuru run --disk-size 2048 -- df -h /</span></p>
             <p class="text-amber">Filesystem      Size  Used Avail Use% Mounted on</p>
             <p class="text-amber">/dev/vda        2.0G   18M  1.9G   1% /</p>
+          </div>
+
+          <div class="cli-panel p-5 font-mono text-xs leading-[1.8] md:p-6 md:text-sm" data-hash="mounts">
+            <p><span class="text-dim">$</span> <span class="text-text">shuru run --mount ./src:/workspace -- ls /workspace</span></p>
+            <p class="text-amber">main.py  utils.py  tests/</p>
+            <br />
+            <p><span class="text-dim">$</span> <span class="text-text">shuru run --mount ./src:/workspace -- sh -c 'echo "new" > /workspace/tmp && cat /workspace/tmp'</span></p>
+            <p class="text-amber">new</p>
+            <br />
+            <p class="text-muted"># Host directory is untouched. Guest writes live in a tmpfs overlay.</p>
           </div>
 
           <div class="cli-panel p-5 font-mono text-xs leading-[1.8] md:p-6 md:text-sm" data-hash="checkpoints">
@@ -164,7 +184,7 @@
 </style>
 
 <script>
-  const VALID_HASHES = ['ephemeral-runs', 'networking', 'resources', 'checkpoints', 'port-forwarding'];
+  const VALID_HASHES = ['ephemeral-runs', 'networking', 'resources', 'mounts', 'checkpoints', 'port-forwarding'];
   const DEFAULT_HASH = 'ephemeral-runs';
 
   function activate(hash: string) {
