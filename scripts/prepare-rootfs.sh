@@ -42,6 +42,8 @@ if [ ! -f "$GUEST_BINARY" ]; then
     exit 1
 fi
 
+GUEST_BINARY="$(cd "$(dirname "$GUEST_BINARY")" && pwd)/$(basename "$GUEST_BINARY")"
+
 mkdir -p "$DATA_DIR"
 
 # --- Download Alpine minirootfs ---
@@ -143,6 +145,7 @@ DHCPEOF
         --platform linux/arm64/v8 \
         -v "${DATA_DIR}:/output" \
         -v "${UDHCPC_SCRIPT}:/tmp/udhcpc.sh:ro" \
+        -v "${GUEST_BINARY}:/tmp/shuru-init:ro" \
         alpine:3.21 /bin/sh -c '
             set -e
             apk add --no-cache linux-virt kmod findutils cpio gzip > /dev/null 2>&1
@@ -159,7 +162,7 @@ DHCPEOF
             # since initramfs has no dynamic linker
             apk add --no-cache busybox-static > /dev/null 2>&1
             cp /bin/busybox.static /initramfs/bin/busybox
-            for cmd in sh mount umount switch_root modprobe insmod mkdir echo cat sleep mknod ln ifconfig route udhcpc; do
+            for cmd in sh mount umount switch_root modprobe insmod mkdir echo cat sleep mknod ln cp chmod ifconfig route udhcpc; do
                 ln -sf busybox "/initramfs/bin/${cmd}"
             done
 
@@ -222,6 +225,10 @@ DHCPEOF
             cp /tmp/udhcpc.sh /initramfs/etc/udhcpc.sh
             chmod 755 /initramfs/etc/udhcpc.sh
 
+            # Copy guest binary into initramfs (stamped into rootfs on every boot)
+            cp /tmp/shuru-init /initramfs/bin/shuru-init
+            chmod 755 /initramfs/bin/shuru-init
+
             # Create init script
             cat > /initramfs/init << '\''INITEOF'\''
 #!/bin/sh
@@ -257,11 +264,9 @@ echo "initramfs: resizing filesystem..."
 echo "initramfs: mounting /dev/vda..."
 /bin/mount -t ext4 /dev/vda /newroot
 
-if [ ! -x /newroot/usr/bin/shuru-init ]; then
-    echo "initramfs: ERROR - /usr/bin/shuru-init not found on root!"
-    ls -la /newroot/sbin/ 2>/dev/null
-    exec /bin/sh
-fi
+# Stamp latest guest binary from initramfs into rootfs
+cp /bin/shuru-init /newroot/usr/bin/shuru-init
+chmod 755 /newroot/usr/bin/shuru-init
 
 # Network setup (if eth0 exists) -- do DHCP before switch_root
 # so shuru-guest does not race the host NAT attachment
