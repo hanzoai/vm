@@ -351,7 +351,15 @@ else
     sudo mkdir -p "${MOUNT_DIR}/proc" "${MOUNT_DIR}/sys" "${MOUNT_DIR}/dev" "${MOUNT_DIR}/tmp" "${MOUNT_DIR}/run"
     echo "shuru" | sudo tee "${MOUNT_DIR}/etc/hostname" > /dev/null
     echo "nameserver 8.8.8.8" | sudo tee "${MOUNT_DIR}/etc/resolv.conf" > /dev/null
-    sudo apk add --no-cache --root "$MOUNT_DIR" gcompat > /dev/null 2>&1
+    # Install gcompat into the Alpine rootfs
+    if command -v apk &>/dev/null; then
+        sudo apk add --no-cache --root "$MOUNT_DIR" gcompat > /dev/null 2>&1
+    else
+        # Non-Alpine host (e.g. Ubuntu CI): chroot into the ARM64 Alpine rootfs
+        sudo mount --bind /etc/resolv.conf "${MOUNT_DIR}/etc/resolv.conf"
+        sudo chroot "$MOUNT_DIR" /sbin/apk add --no-cache gcompat > /dev/null 2>&1
+        sudo umount "${MOUNT_DIR}/etc/resolv.conf" 2>/dev/null || true
+    fi
     sudo umount "$MOUNT_DIR"
     rmdir "$MOUNT_DIR" 2>/dev/null || true
 fi
