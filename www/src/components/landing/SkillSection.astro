@@ -1,0 +1,91 @@
+<section class="relative border-x border-border">
+  <span class="section-label">Skill</span>
+
+  <div class="border-b border-dashed border-border px-8 pt-16 pb-16 md:px-16 md:pt-24 md:pb-24">
+    <h2 class="text-2xl font-semibold tracking-tight md:text-4xl lg:text-5xl">
+      Works with your agent.
+      <br />
+      <span class="text-muted">Install once, sandbox everything.</span>
+    </h2>
+
+    <p class="mt-6 max-w-2xl text-sm leading-relaxed text-muted">
+      Shuru ships as an <a href="https://agentskills.io" target="_blank" rel="noopener" class="text-text underline decoration-border underline-offset-4 hover:decoration-muted">agent skill</a>.
+      Once installed, AI agents automatically use <span class="font-mono text-text">shuru run</span> whenever they need sandboxed execution — no prompting required.
+    </p>
+
+    <div class="mt-12 grid gap-0 border border-border md:grid-cols-2">
+      <!-- Install method 1 -->
+      <div class="border-b border-border p-6 md:border-b-0 md:border-r md:p-8">
+        <div class="mb-3 font-mono text-[10px] uppercase tracking-widest text-dim">01</div>
+        <h3 class="text-base font-semibold">Skills CLI</h3>
+        <p class="mt-2 text-sm leading-relaxed text-muted">Install with one command. Works across Claude Code, Cursor, Copilot, and more.</p>
+        <div class="mt-5 border border-border">
+          <div class="flex items-center gap-2 border-b border-border px-4 py-2">
+            <span class="h-2.5 w-2.5 border border-[#ff5f57] bg-[#ff5f57]/20"></span>
+            <span class="h-2.5 w-2.5 border border-[#febc2e] bg-[#febc2e]/20"></span>
+            <span class="h-2.5 w-2.5 border border-[#28c840] bg-[#28c840]/20"></span>
+            <span class="ml-2 font-mono text-[10px] text-dim">terminal</span>
+          </div>
+          <div class="relative p-4 font-mono text-xs leading-[1.8] md:text-sm">
+            <button
+              class="copy-btn absolute top-3 right-3 flex h-7 w-7 items-center justify-center border border-border text-dim transition-colors hover:border-muted hover:text-muted"
+              data-cmd="npx skills add superhq-ai/shuru"
+              aria-label="Copy command"
+            >
+              <svg class="copy-icon h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
+                <rect x="9" y="9" width="13" height="13" rx="0" />
+                <path d="M5 15H4a1 1 0 01-1-1V4a1 1 0 011-1h10a1 1 0 011 1v1" />
+              </svg>
+              <svg class="check-icon hidden h-3.5 w-3.5 text-amber" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
+                <path d="M5 13l4 4L19 7" />
+              </svg>
+            </button>
+            <p><span class="text-dim">$</span> <span class="text-text">npx skills add superhq-ai/shuru</span></p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Install method 2 -->
+      <div class="p-6 md:p-8">
+        <div class="mb-3 font-mono text-[10px] uppercase tracking-widest text-dim">02</div>
+        <h3 class="text-base font-semibold">Manual</h3>
+        <p class="mt-2 text-sm leading-relaxed text-muted">Copy the skill into your project or home directory for Claude Code.</p>
+        <div class="mt-5 border border-border">
+          <div class="flex items-center gap-2 border-b border-border px-4 py-2">
+            <span class="h-2.5 w-2.5 border border-[#ff5f57] bg-[#ff5f57]/20"></span>
+            <span class="h-2.5 w-2.5 border border-[#febc2e] bg-[#febc2e]/20"></span>
+            <span class="h-2.5 w-2.5 border border-[#28c840] bg-[#28c840]/20"></span>
+            <span class="ml-2 font-mono text-[10px] text-dim">terminal</span>
+          </div>
+          <div class="relative p-4 font-mono text-xs leading-[1.8] md:text-sm">
+            <button
+              class="copy-btn absolute top-3 right-3 flex h-7 w-7 items-center justify-center border border-border text-dim transition-colors hover:border-muted hover:text-muted"
+              data-cmd="cp -r skills/shuru .claude/skills/shuru"
+              aria-label="Copy command"
+            >
+              <svg class="copy-icon h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
+                <rect x="9" y="9" width="13" height="13" rx="0" />
+                <path d="M5 15H4a1 1 0 01-1-1V4a1 1 0 011-1h10a1 1 0 011 1v1" />
+              </svg>
+              <svg class="check-icon hidden h-3.5 w-3.5 text-amber" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
+                <path d="M5 13l4 4L19 7" />
+              </svg>
+            </button>
+            <p><span class="text-dim">$</span> <span class="text-text">cp -r skills/shuru .claude/skills/shuru</span></p>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Supported agents -->
+    <div class="mt-8 flex flex-wrap items-center gap-3">
+      <span class="font-mono text-[10px] uppercase tracking-widest text-dim">Works with</span>
+      <span class="border border-border px-3 py-1 font-mono text-xs text-muted">Claude Code</span>
+      <span class="border border-border px-3 py-1 font-mono text-xs text-muted">Cursor</span>
+      <span class="border border-border px-3 py-1 font-mono text-xs text-muted">GitHub Copilot</span>
+      <span class="border border-border px-3 py-1 font-mono text-xs text-muted">Gemini CLI</span>
+      <span class="border border-border px-3 py-1 font-mono text-xs text-muted">OpenAI Codex</span>
+      <span class="border border-border px-3 py-1 font-mono text-xs text-muted">+ more</span>
+    </div>
+  </div>
+</section>

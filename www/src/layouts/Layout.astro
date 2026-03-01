@@ -45,5 +45,22 @@ const { title, description = "Local-first microVM sandbox for AI agents on macOS
   </head>
   <body class="min-h-screen bg-bg text-text antialiased">
     <slot />
+    <script>
+      document.querySelectorAll<HTMLButtonElement>(".copy-btn").forEach((btn) => {
+        btn.addEventListener("click", async () => {
+          const cmd = btn.dataset.cmd;
+          if (!cmd) return;
+          await navigator.clipboard.writeText(cmd);
+          const copyIcon = btn.querySelector(".copy-icon");
+          const checkIcon = btn.querySelector(".check-icon");
+          copyIcon?.classList.add("hidden");
+          checkIcon?.classList.remove("hidden");
+          setTimeout(() => {
+            copyIcon?.classList.remove("hidden");
+            checkIcon?.classList.add("hidden");
+          }, 2000);
+        });
+      });
+    </script>
   </body>
 </html>

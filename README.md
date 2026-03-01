@@ -99,6 +99,20 @@ Shuru loads `shuru.json` from the current directory (or `--config PATH`). All fi
 }
 ```
 
+## Agent Skill
+
+Shuru ships as an [agent skill](https://agentskills.io) so AI agents (Claude Code, Cursor, Copilot, etc.) can use it automatically.
+
+```sh
+# Install via Vercel's skills CLI
+npx skills add superhq-ai/shuru
+
+# Or manually copy into your project
+cp -r skills/shuru .claude/skills/shuru
+```
+
+Once installed, agents will use `shuru run` whenever they need sandboxed execution.
+
 ## Architecture
 
 ```

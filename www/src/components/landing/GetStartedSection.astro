@@ -20,15 +20,15 @@
       </div>
       <div class="relative p-5 font-mono text-xs leading-[1.8] md:p-6 md:text-sm">
         <button
-          id="copy-install"
-          class="absolute top-4 right-4 flex h-7 w-7 items-center justify-center border border-border text-dim transition-colors hover:border-muted hover:text-muted"
+          class="copy-btn absolute top-4 right-4 flex h-7 w-7 items-center justify-center border border-border text-dim transition-colors hover:border-muted hover:text-muted"
+          data-cmd="curl -fsSL https://shuru.run/install.sh | sh"
           aria-label="Copy install command"
         >
-          <svg id="copy-icon" class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
+          <svg class="copy-icon h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
             <rect x="9" y="9" width="13" height="13" rx="0" />
             <path d="M5 15H4a1 1 0 01-1-1V4a1 1 0 011-1h10a1 1 0 011 1v1" />
           </svg>
-          <svg id="check-icon" class="hidden h-3.5 w-3.5 text-amber" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
+          <svg class="check-icon hidden h-3.5 w-3.5 text-amber" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
             <path d="M5 13l4 4L19 7" />
           </svg>
         </button>
@@ -48,22 +48,3 @@
   </div>
 </section>
 
-<script>
-  const copyBtn = document.getElementById("copy-install");
-  const copyIcon = document.getElementById("copy-icon");
-  const checkIcon = document.getElementById("check-icon");
-
-  copyBtn?.addEventListener("click", async () => {
-    const text = "curl -fsSL https://shuru.run/install.sh | sh";
-    await navigator.clipboard.writeText(text);
-    if (window.umami && typeof window.umami.track === "function") {
-      window.umami.track("install-command-copied");
-    }
-    copyIcon?.classList.add("hidden");
-    checkIcon?.classList.remove("hidden");
-    setTimeout(() => {
-      copyIcon?.classList.remove("hidden");
-      checkIcon?.classList.add("hidden");
-    }, 2000);
-  });
-</script>
