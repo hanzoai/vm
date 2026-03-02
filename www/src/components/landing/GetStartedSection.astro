@@ -13,17 +13,17 @@
 
     <div class="mx-auto mt-12 max-w-2xl border border-border">
       <div class="flex items-center border-b border-border">
-        <button class="install-tab active px-4 py-2.5 font-mono text-[10px] uppercase tracking-widest" data-tab="homebrew">
+        <a href="#install-homebrew" class="install-tab px-4 py-2.5 font-mono text-[10px] uppercase tracking-widest" data-tab="install-homebrew">
           <svg class="inline-block h-3 w-3 mr-1.5 -mt-px" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 11h1a3 3 0 0 1 0 6h-1"/><path d="M3 11h14v7a4 4 0 0 1-4 4H7a4 4 0 0 1-4-4Z"/><path d="m6 8 4-6"/><path d="m11 8 2-4"/></svg>
           Homebrew
-        </button>
-        <button class="install-tab px-4 py-2.5 font-mono text-[10px] uppercase tracking-widest" data-tab="script">
+        </a>
+        <a href="#install-script" class="install-tab px-4 py-2.5 font-mono text-[10px] uppercase tracking-widest" data-tab="install-script">
           <svg class="inline-block h-3 w-3 mr-1.5 -mt-px" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 17 10 11 4 5"/><line x1="12" x2="20" y1="19" y2="19"/></svg>
           Script
-        </button>
+        </a>
       </div>
 
-      <div class="install-panel active relative p-5 font-mono text-xs leading-[1.8] md:p-6 md:text-sm" data-tab="homebrew">
+      <div class="install-panel active relative p-5 font-mono text-xs leading-[1.8] md:p-6 md:text-sm" data-tab="install-homebrew">
         <button
           class="copy-btn absolute top-4 right-4 flex h-7 w-7 items-center justify-center border border-border text-dim transition-colors hover:border-muted hover:text-muted"
           data-cmd="brew tap superhq-ai/tap && brew install shuru"
@@ -50,7 +50,7 @@
         </p>
       </div>
 
-      <div class="install-panel relative p-5 font-mono text-xs leading-[1.8] md:p-6 md:text-sm" data-tab="script">
+      <div class="install-panel relative p-5 font-mono text-xs leading-[1.8] md:p-6 md:text-sm" data-tab="install-script">
         <button
           class="copy-btn absolute top-4 right-4 flex h-7 w-7 items-center justify-center border border-border text-dim transition-colors hover:border-muted hover:text-muted"
           data-cmd="curl -fsSL https://shuru.run/install.sh | sh"
@@ -87,6 +87,7 @@
     cursor: pointer;
     transition: color 0.15s ease, border-color 0.15s ease;
     background: none;
+    text-decoration: none;
   }
 
   .install-tab:hover {
@@ -108,15 +109,25 @@
 </style>
 
 <script>
-  document.querySelectorAll('.install-tab').forEach((tab) => {
-    tab.addEventListener('click', () => {
-      const target = (tab as HTMLElement).dataset.tab;
+  const INSTALL_TABS = ['install-homebrew', 'install-script'];
+  const DEFAULT_TAB = 'install-homebrew';
 
-      document.querySelectorAll('.install-tab').forEach((t) => t.classList.remove('active'));
-      document.querySelectorAll('.install-panel').forEach((p) => p.classList.remove('active'));
+  function activateInstall(tab: string) {
+    if (!INSTALL_TABS.includes(tab)) tab = DEFAULT_TAB;
 
-      tab.classList.add('active');
-      document.querySelector(`.install-panel[data-tab="${target}"]`)?.classList.add('active');
-    });
+    document.querySelectorAll('.install-tab').forEach((t) => t.classList.remove('active'));
+    document.querySelectorAll('.install-panel').forEach((p) => p.classList.remove('active'));
+
+    document.querySelector(`.install-tab[data-tab="${tab}"]`)?.classList.add('active');
+    document.querySelector(`.install-panel[data-tab="${tab}"]`)?.classList.add('active');
+  }
+
+  activateInstall(window.location.hash.replace('#', '') || DEFAULT_TAB);
+
+  window.addEventListener('hashchange', () => {
+    const hash = window.location.hash.replace('#', '');
+    if (INSTALL_TABS.includes(hash)) {
+      activateInstall(hash);
+    }
   });
 </script>
