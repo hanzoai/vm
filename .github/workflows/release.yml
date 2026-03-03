@@ -12,7 +12,6 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  # ── Build OS image (kernel + initramfs + rootfs) on Linux ───────────
   build-os-image:
     runs-on: ubuntu-24.04-arm
     steps:
@@ -49,7 +48,6 @@ jobs:
           path: shuru-os-*.tar.gz
           retention-days: 1
 
-  # ── Build CLI binary on macOS (Apple Silicon) ───────────────────────
   build-cli:
     runs-on: macos-14
     steps:
@@ -78,7 +76,6 @@ jobs:
           path: shuru-*.tar.gz
           retention-days: 1
 
-  # ── Create GitHub Release ───────────────────────────────────────────
   release:
     needs: [build-os-image, build-cli]
     runs-on: ubuntu-latest

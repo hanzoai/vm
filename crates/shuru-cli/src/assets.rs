@@ -88,6 +88,12 @@ struct GithubRelease {
 
 /// Check for a newer release and upgrade the CLI binary + OS image.
 pub fn upgrade(data_dir: &str) -> Result<()> {
+    if let Ok(exe) = std::env::current_exe() {
+        if exe.to_string_lossy().contains("/Cellar/") {
+            bail!("This copy was installed via Homebrew. Please run `brew upgrade shuru` instead");
+        }
+    }
+
     eprintln!("shuru: checking for updates...");
 
     let api_url = format!(

@@ -2,6 +2,7 @@ mod assets;
 mod checkpoint;
 mod cli;
 mod config;
+mod stdio;
 mod vm;
 
 use std::process;
@@ -29,6 +30,7 @@ fn main() -> Result<()> {
             vm,
             from,
             console,
+            stdio,
             command,
         } => {
             let cfg = load_config(vm.config.as_deref())?;
@@ -44,7 +46,9 @@ fn main() -> Result<()> {
 
             let prepared = vm::prepare_vm(&vm, &cfg, from.as_deref())?;
 
-            let exit_code = if console {
+            let exit_code = if stdio {
+                stdio::run_stdio(&prepared)?
+            } else if console {
                 run_console(&prepared)?
             } else {
                 vm::run_command(&prepared, &command)?
