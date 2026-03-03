@@ -1,0 +1,74 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  sdk-unit:
+    name: SDK unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - run: bun install
+        working-directory: packages/sdk
+      - run: bun test test/unit/
+        working-directory: packages/sdk
+
+  sdk-lint:
+    name: SDK lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - run: bun install
+        working-directory: packages/sdk
+      - run: bunx --bun @biomejs/biome check src/
+        working-directory: packages/sdk
+
+  rust-check:
+    name: Rust check
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo check -p shuru-cli
+
+  sdk-integration:
+    name: SDK integration tests
+    if: github.event_name == 'push'
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-unknown-linux-musl
+      - uses: Swatinem/rust-cache@v2
+      - uses: oven-sh/setup-bun@v2
+
+      - name: Install musl cross-compiler
+        run: brew install messense/macos-cross-toolchains/aarch64-unknown-linux-musl
+
+      - name: Build shuru-guest
+        run: cargo build -p shuru-guest --target aarch64-unknown-linux-musl --release
+
+      - name: Build shuru CLI
+        run: cargo build -p shuru-cli
+
+      - name: Codesign
+        run: codesign --entitlements shuru.entitlements --force -s - target/debug/shuru
+
+      - name: Download assets
+        run: target/debug/shuru init
+
+      - name: Install SDK deps
+        run: bun install
+        working-directory: packages/sdk
+
+      - name: Run integration tests
+        run: bun test test/integration/
+        working-directory: packages/sdk

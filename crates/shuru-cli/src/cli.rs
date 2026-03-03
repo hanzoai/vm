@@ -65,6 +65,10 @@ pub(crate) enum Commands {
         #[arg(long)]
         console: bool,
 
+        /// Run in stdio mode (JSON-lines protocol over stdin/stdout)
+        #[arg(long, hide = true)]
+        stdio: bool,
+
         /// Command and arguments to run inside the VM
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         command: Vec<String>,

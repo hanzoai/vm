@@ -1,0 +1,18 @@
+{
+  "name": "@superhq/shuru",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "files": ["src"],
+  "scripts": {
+    "test": "bun test test/unit/",
+    "test:integration": "bun test test/integration/",
+    "check": "biome check src/",
+    "format": "biome check --write src/"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.4.5",
+    "@types/bun": "^1.3.10"
+  }
+}
