@@ -64,5 +64,25 @@ pub struct MountResponse {
     pub error: Option<String>,
 }
 
+// --- File I/O protocol ---
+
+#[derive(Serialize, Deserialize)]
+pub struct ReadFileRequest {
+    pub path: String,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct WriteFileRequest {
+    pub path: String,
+    pub len: u64,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct WriteFileResponse {
+    pub ok: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
 pub const VSOCK_PORT: u32 = 1024;
 pub const VSOCK_PORT_FORWARD: u32 = 1025;

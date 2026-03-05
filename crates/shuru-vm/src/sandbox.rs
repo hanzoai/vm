@@ -14,6 +14,7 @@ use shuru_darwin::*;
 
 use shuru_proto::{
     frame, ExecRequest, ForwardRequest, ForwardResponse, MountRequest, MountResponse, PortMapping,
+    ReadFileRequest, WriteFileRequest, WriteFileResponse,
     VSOCK_PORT, VSOCK_PORT_FORWARD,
 };
 
@@ -292,6 +293,59 @@ impl Sandbox {
         }
 
         Ok(exit_code)
+    }
+
+    pub fn read_file(&self, path: &str) -> Result<Vec<u8>> {
+        let stream = self.connect_vsock()?;
+        let mut writer = stream.try_clone()?;
+        let mut reader = stream;
+
+        self.send_mount_requests(&mut writer, &mut reader)?;
+
+        let req = ReadFileRequest { path: path.to_string() };
+        frame::send_json(&mut writer, frame::READ_FILE_REQ, &req)?;
+
+        match frame::read_frame(&mut reader).context("reading read_file response")? {
+            Some((frame::READ_FILE_RESP, payload)) => Ok(payload),
+            Some((frame::ERROR, payload)) => {
+                bail!("{}", String::from_utf8_lossy(&payload));
+            }
+            Some((other, _)) => {
+                bail!("unexpected frame type 0x{:02x} in read_file response", other);
+            }
+            None => bail!("guest closed connection during read_file"),
+        }
+    }
+
+    pub fn write_file(&self, path: &str, content: &[u8]) -> Result<()> {
+        let stream = self.connect_vsock()?;
+        let mut writer = stream.try_clone()?;
+        let mut reader = stream;
+
+        self.send_mount_requests(&mut writer, &mut reader)?;
+
+        let req = WriteFileRequest {
+            path: path.to_string(),
+            len: content.len() as u64,
+        };
+        frame::send_json(&mut writer, frame::WRITE_FILE_REQ, &req)?;
+        frame::write_frame(&mut writer, frame::WRITE_FILE_DATA, content)?;
+
+        let (_msg_type, payload) = frame::read_frame(&mut reader)
+            .context("reading write_file response")?
+            .context("guest closed connection during write_file")?;
+
+        let resp: WriteFileResponse = serde_json::from_slice(&payload)
+            .context("parsing write_file response")?;
+
+        if !resp.ok {
+            bail!(
+                "write_file failed: {}",
+                resp.error.unwrap_or_else(|| "unknown error".into())
+            );
+        }
+
+        Ok(())
     }
 
     /// Run an interactive shell session with PTY support.

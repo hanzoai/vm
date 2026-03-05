@@ -1,15 +1,17 @@
 import type { Subprocess } from "bun";
-import type { StdioResponse } from "./types";
+import type { JsonRpcResponse, JsonRpcResult } from "./types";
 
 interface PendingRequest {
-	resolve: (value: StdioResponse) => void;
+	resolve: (value: JsonRpcResult) => void;
 	reject: (reason: Error) => void;
 }
 
 export class ShuruProcess {
 	private proc: Subprocess<"pipe", "pipe", "inherit"> | null = null;
-	private pending = new Map<string, PendingRequest>();
+	private pending = new Map<number, PendingRequest>();
 	private idCounter = 0;
+	private onReady: (() => void) | null = null;
+	private onReadyError: ((err: Error) => void) | null = null;
 
 	async start(args: string[]): Promise<void> {
 		this.proc = Bun.spawn(args, {
@@ -25,27 +27,28 @@ export class ShuruProcess {
 				reject(new Error("shuru: timed out waiting for ready signal (30s)"));
 			}, 30_000);
 
-			this.pending.set("__ready__", {
-				resolve: () => {
-					clearTimeout(timeout);
-					resolve();
-				},
-				reject: (err: Error) => {
-					clearTimeout(timeout);
-					reject(err);
-				},
-			});
+			this.onReady = () => {
+				clearTimeout(timeout);
+				resolve();
+			};
+			this.onReadyError = (err: Error) => {
+				clearTimeout(timeout);
+				reject(err);
+			};
 		});
 	}
 
-	async send(msg: Record<string, unknown>): Promise<StdioResponse> {
+	send(
+		method: string,
+		params: Record<string, unknown>,
+	): Promise<JsonRpcResult> {
 		if (!this.proc) throw new Error("shuru process not started");
 
-		const id = String(++this.idCounter);
-		const line = `${JSON.stringify({ id, ...msg })}\n`;
+		const id = ++this.idCounter;
+		const line = `${JSON.stringify({ jsonrpc: "2.0", id, method, params })}\n`;
 		const proc = this.proc;
 
-		return new Promise<StdioResponse>((resolve, reject) => {
+		return new Promise<JsonRpcResult>((resolve, reject) => {
 			this.pending.set(id, { resolve, reject });
 			proc.stdin.write(line);
 			proc.stdin.flush();
@@ -88,21 +91,26 @@ export class ShuruProcess {
 
 		const reader = this.proc.stdout.getReader();
 		const decoder = new TextDecoder();
-		let buffer = "";
+		let remainder = "";
 
 		try {
 			while (true) {
 				const { done, value } = await reader.read();
 				if (done) break;
 
-				buffer += decoder.decode(value, { stream: true });
-				const lines = buffer.split("\n");
-				buffer = lines.pop() ?? "";
+				remainder += decoder.decode(value, { stream: true });
 
-				for (const line of lines) {
+				while (true) {
+					const newlineIdx = remainder.indexOf("\n");
+					if (newlineIdx === -1) break;
+					const line = remainder.slice(0, newlineIdx);
+					remainder = remainder.slice(newlineIdx + 1);
+
 					if (!line) continue;
+
 					try {
-						this.dispatch(JSON.parse(line) as StdioResponse);
+						const msg = JSON.parse(line) as JsonRpcResponse;
+						this.dispatch(msg);
 					} catch {
 						// malformed line
 					}
@@ -112,33 +120,38 @@ export class ShuruProcess {
 			// stream closed
 		}
 
+		if (this.onReadyError) {
+			this.onReadyError(new Error("shuru process exited unexpectedly"));
+			this.onReady = null;
+			this.onReadyError = null;
+		}
 		for (const [, req] of this.pending) {
 			req.reject(new Error("shuru process exited unexpectedly"));
 		}
 		this.pending.clear();
 	}
 
-	private dispatch(msg: StdioResponse): void {
-		if (msg.type === "ready") {
-			const req = this.pending.get("__ready__");
-			if (req) {
-				this.pending.delete("__ready__");
-				req.resolve(msg);
+	private dispatch(msg: JsonRpcResponse): void {
+		if ("method" in msg && msg.method === "ready") {
+			if (this.onReady) {
+				this.onReady();
+				this.onReady = null;
+				this.onReadyError = null;
 			}
 			return;
 		}
 
-		const { id } = msg;
-		if (!id) return;
+		if (!("id" in msg) || msg.id == null) return;
+		const id = msg.id as number;
 
 		const req = this.pending.get(id);
 		if (!req) return;
 		this.pending.delete(id);
 
-		if (msg.type === "error") {
-			req.reject(new Error(msg.error));
+		if ("error" in msg) {
+			req.reject(new Error(msg.error.message));
 		} else {
-			req.resolve(msg);
+			req.resolve(msg as JsonRpcResult);
 		}
 	}
 }

@@ -1,6 +1,13 @@
 import { ShuruProcess } from "./process";
 import type { ExecResult, StartOptions } from "./types";
 
+const Method = {
+	EXEC: "exec",
+	READ_FILE: "read_file",
+	WRITE_FILE: "write_file",
+	CHECKPOINT: "checkpoint",
+} as const;
+
 export class Sandbox {
 	private proc: ShuruProcess;
 	private stopped = false;
@@ -20,57 +27,34 @@ export class Sandbox {
 	}
 
 	async exec(command: string): Promise<ExecResult> {
-		const resp = await this.proc.send({
-			type: "exec",
+		const resp = await this.proc.send(Method.EXEC, {
 			argv: ["sh", "-c", command],
 		});
-		if (resp.type !== "exec") {
-			throw new Error(`unexpected response type: ${resp.type}`);
-		}
+		const r = resp.result as {
+			stdout: string;
+			stderr: string;
+			exit_code: number;
+		};
 		return {
-			stdout: resp.stdout,
-			stderr: resp.stderr,
-			exitCode: resp.exit_code,
+			stdout: r.stdout,
+			stderr: r.stderr,
+			exitCode: r.exit_code,
 		};
 	}
 
-	async readFile(path: string): Promise<string> {
-		const resp = await this.proc.send({
-			type: "exec",
-			argv: ["cat", path],
-		});
-		if (resp.type !== "exec") {
-			throw new Error(`unexpected response type: ${resp.type}`);
-		}
-		if (resp.exit_code !== 0) {
-			throw new Error(
-				`readFile failed (exit ${resp.exit_code}): ${resp.stderr}`,
-			);
-		}
-		return resp.stdout;
+	async readFile(path: string): Promise<Uint8Array> {
+		const resp = await this.proc.send(Method.READ_FILE, { path });
+		const r = resp.result as { content: string };
+		return new Uint8Array(Buffer.from(r.content, "base64"));
 	}
 
-	async writeFile(path: string, content: string): Promise<void> {
-		const b64 = btoa(content);
-		const resp = await this.proc.send({
-			type: "exec",
-			argv: ["sh", "-c", `echo '${b64}' | base64 -d > "$1"`, "--", path],
-		});
-		if (resp.type !== "exec") {
-			throw new Error(`unexpected response type: ${resp.type}`);
-		}
-		if (resp.exit_code !== 0) {
-			throw new Error(
-				`writeFile failed (exit ${resp.exit_code}): ${resp.stderr}`,
-			);
-		}
+	async writeFile(path: string, content: Uint8Array | string): Promise<void> {
+		const b64 = Buffer.from(content).toString("base64");
+		await this.proc.send(Method.WRITE_FILE, { path, content: b64 });
 	}
 
 	async checkpoint(name: string): Promise<void> {
-		const resp = await this.proc.send({ type: "checkpoint", name });
-		if (resp.type !== "checkpoint") {
-			throw new Error(`unexpected response type: ${resp.type}`);
-		}
+		await this.proc.send(Method.CHECKPOINT, { name });
 		this.stopped = true;
 		await this.proc.stop();
 	}

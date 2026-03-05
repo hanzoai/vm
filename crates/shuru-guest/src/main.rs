@@ -5,7 +5,10 @@ mod guest {
     use std::process::{Command, Stdio};
 
     use shuru_proto::frame;
-    use shuru_proto::{ExecRequest, ForwardRequest, ForwardResponse, MountRequest, MountResponse};
+    use shuru_proto::{
+        ExecRequest, ForwardRequest, ForwardResponse, MountRequest, MountResponse,
+        ReadFileRequest, WriteFileRequest, WriteFileResponse,
+    };
     use shuru_proto::{VSOCK_PORT, VSOCK_PORT_FORWARD};
 
     fn mount_fs(source: &str, target: &str, fstype: &str, data: Option<&str>) -> bool {
@@ -334,7 +337,91 @@ mod guest {
                     // Non-TTY mode: piped exec
                     handle_piped_exec(&req, &mut writer);
                 }
+                frame::READ_FILE_REQ => {
+                    let req: ReadFileRequest = match serde_json::from_slice(&payload) {
+                        Ok(r) => r,
+                        Err(e) => {
+                            let msg = format!("invalid read_file request: {}", e);
+                            let _ = frame::write_frame(&mut writer, frame::ERROR, msg.as_bytes());
+                            continue;
+                        }
+                    };
+                    handle_read_file(&req, &mut writer);
+                }
+                frame::WRITE_FILE_REQ => {
+                    let req: WriteFileRequest = match serde_json::from_slice(&payload) {
+                        Ok(r) => r,
+                        Err(e) => {
+                            let msg = format!("invalid write_file request: {}", e);
+                            let _ = frame::write_frame(&mut writer, frame::ERROR, msg.as_bytes());
+                            continue;
+                        }
+                    };
+                    handle_write_file(&req, &mut reader, &mut writer);
+                }
                 _ => {} // unknown type, skip
+            }
+        }
+    }
+
+    fn handle_read_file(req: &ReadFileRequest, writer: &mut impl Write) {
+        match std::fs::read(&req.path) {
+            Ok(data) => {
+                let _ = frame::write_frame(writer, frame::READ_FILE_RESP, &data);
+            }
+            Err(e) => {
+                let msg = format!("read_file {}: {}", req.path, e);
+                let _ = frame::write_frame(writer, frame::ERROR, msg.as_bytes());
+            }
+        }
+    }
+
+    fn handle_write_file(
+        req: &WriteFileRequest,
+        reader: &mut impl Read,
+        writer: &mut impl Write,
+    ) {
+        let data = match frame::read_frame(reader) {
+            Ok(Some((frame::WRITE_FILE_DATA, payload))) => payload,
+            _ => {
+                let resp = WriteFileResponse {
+                    ok: false,
+                    error: Some("expected WRITE_FILE_DATA frame".into()),
+                };
+                let _ = frame::send_json(writer, frame::WRITE_FILE_RESP, &resp);
+                return;
+            }
+        };
+
+        if data.len() as u64 != req.len {
+            let resp = WriteFileResponse {
+                ok: false,
+                error: Some(format!(
+                    "length mismatch: expected {}, got {}",
+                    req.len,
+                    data.len()
+                )),
+            };
+            let _ = frame::send_json(writer, frame::WRITE_FILE_RESP, &resp);
+            return;
+        }
+
+        if let Some(parent) = std::path::Path::new(&req.path).parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+
+        match std::fs::write(&req.path, &data) {
+            Ok(()) => {
+                unsafe { libc::sync(); }
+                let resp = WriteFileResponse { ok: true, error: None };
+                let _ = frame::send_json(writer, frame::WRITE_FILE_RESP, &resp);
+            }
+            Err(e) => {
+                let resp = WriteFileResponse {
+                    ok: false,
+                    error: Some(format!("write_file {}: {}", req.path, e)),
+                };
+                let _ = frame::send_json(writer, frame::WRITE_FILE_RESP, &resp);
             }
         }
     }

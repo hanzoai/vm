@@ -15,14 +15,26 @@ export interface ExecResult {
 	exitCode: number;
 }
 
-export type StdioResponse =
-	| { type: "ready" }
-	| {
-			type: "exec";
-			id: string;
-			stdout: string;
-			stderr: string;
-			exit_code: number;
-	  }
-	| { type: "checkpoint"; id: string; ok: boolean }
-	| { type: "error"; id: string; error: string };
+// --- JSON-RPC 2.0 wire types (internal) ---
+
+export interface JsonRpcResult {
+	jsonrpc: "2.0";
+	id: number;
+	result: unknown;
+}
+
+export interface JsonRpcError {
+	jsonrpc: "2.0";
+	id: number;
+	error: { code: number; message: string };
+}
+
+export interface JsonRpcNotification {
+	jsonrpc: "2.0";
+	method: string;
+}
+
+export type JsonRpcResponse =
+	| JsonRpcResult
+	| JsonRpcError
+	| JsonRpcNotification;

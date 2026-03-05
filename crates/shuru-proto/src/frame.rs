@@ -17,6 +17,13 @@ pub const EXEC_REQ: u8 = 0x10;
 pub const MOUNT_REQ: u8 = 0x11;
 pub const MOUNT_RESP: u8 = 0x12;
 
+// File I/O
+pub const READ_FILE_REQ: u8 = 0x13;
+pub const READ_FILE_RESP: u8 = 0x14;
+pub const WRITE_FILE_REQ: u8 = 0x15;
+pub const WRITE_FILE_DATA: u8 = 0x16;
+pub const WRITE_FILE_RESP: u8 = 0x17;
+
 // Port forwarding
 pub const FWD_REQ: u8 = 0x20;
 pub const FWD_RESP: u8 = 0x21;

@@ -831,6 +831,7 @@ name = "shuru-cli"
 version = "0.1.15"
 dependencies = [
  "anyhow",
+ "base64",
  "clap",
  "flate2",
  "libc",

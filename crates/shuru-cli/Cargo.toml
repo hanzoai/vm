@@ -19,3 +19,4 @@ tar = "0.4"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 ureq = { version = "3", features = ["json"] }
+base64 = "0.22.1"

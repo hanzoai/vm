@@ -10,7 +10,7 @@ use std::process;
 use anyhow::Result;
 use clap::Parser;
 
-use shuru_vm::{default_data_dir, Sandbox, VmState};
+use shuru_vm::{default_data_dir, VmState};
 
 use cli::{CheckpointCommands, Cli, Commands};
 use config::load_config;
@@ -141,24 +141,7 @@ fn run_console(prepared: &vm::PreparedVm) -> Result<i32> {
         prepared.cpus, prepared.memory, prepared.disk_size
     );
 
-    let mut builder = Sandbox::builder()
-        .kernel(&prepared.kernel_path)
-        .rootfs(&prepared.work_rootfs)
-        .cpus(prepared.cpus)
-        .memory_mb(prepared.memory)
-        .allow_net(prepared.allow_net);
-
-    if let Some(initrd) = &prepared.initrd_path {
-        eprintln!("shuru: using initramfs: {}", initrd);
-        builder = builder.initrd(initrd);
-    }
-
-    for m in &prepared.mounts {
-        eprintln!("shuru: mount {} -> {}", m.host_path, m.guest_path);
-        builder = builder.mount(m.clone());
-    }
-
-    let sandbox = builder.build()?;
+    let sandbox = vm::build_sandbox(prepared, true)?;
     eprintln!("shuru: VM created and validated successfully");
 
     let state_rx = sandbox.state_channel();

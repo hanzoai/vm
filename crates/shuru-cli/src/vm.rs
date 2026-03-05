@@ -170,6 +170,26 @@ pub(crate) fn prepare_vm(
     })
 }
 
+pub(crate) fn build_sandbox(prepared: &PreparedVm, console: bool) -> Result<Sandbox> {
+    let mut builder = Sandbox::builder()
+        .kernel(&prepared.kernel_path)
+        .rootfs(&prepared.work_rootfs)
+        .cpus(prepared.cpus)
+        .memory_mb(prepared.memory)
+        .allow_net(prepared.allow_net)
+        .console(console);
+
+    if let Some(initrd) = &prepared.initrd_path {
+        builder = builder.initrd(initrd);
+    }
+
+    for m in &prepared.mounts {
+        builder = builder.mount(m.clone());
+    }
+
+    builder.build()
+}
+
 pub(crate) fn run_command(prepared: &PreparedVm, command: &[String]) -> Result<i32> {
     eprintln!("shuru: kernel={}", prepared.kernel_path);
     eprintln!("shuru: rootfs={} (work copy)", prepared.work_rootfs);
@@ -178,25 +198,7 @@ pub(crate) fn run_command(prepared: &PreparedVm, command: &[String]) -> Result<i
         prepared.cpus, prepared.memory, prepared.disk_size
     );
 
-    let mut builder = Sandbox::builder()
-        .kernel(&prepared.kernel_path)
-        .rootfs(&prepared.work_rootfs)
-        .cpus(prepared.cpus)
-        .memory_mb(prepared.memory)
-        .allow_net(prepared.allow_net)
-        .console(false);
-
-    if let Some(initrd) = &prepared.initrd_path {
-        eprintln!("shuru: using initramfs: {}", initrd);
-        builder = builder.initrd(initrd);
-    }
-
-    for m in &prepared.mounts {
-        eprintln!("shuru: mount {} -> {}", m.host_path, m.guest_path);
-        builder = builder.mount(m.clone());
-    }
-
-    let sandbox = builder.build()?;
+    let sandbox = build_sandbox(prepared, false)?;
     eprintln!("shuru: VM created and validated successfully");
 
     eprintln!("shuru: starting VM...");

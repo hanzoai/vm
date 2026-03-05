@@ -4,6 +4,7 @@ mod sandbox;
 
 pub use shuru_proto::{
     frame, ExecRequest, ForwardRequest, ForwardResponse, MountRequest, MountResponse, PortMapping,
+    ReadFileRequest, WriteFileRequest, WriteFileResponse,
     VSOCK_PORT, VSOCK_PORT_FORWARD,
 };
 pub use sandbox::{MountConfig, PortForwardHandle, Sandbox, VmConfigBuilder};

@@ -19,7 +19,8 @@ const result = await sb.exec("echo hello");
 console.log(result.stdout); // "hello\n"
 
 await sb.writeFile("/tmp/app.ts", "console.log('hi')");
-const content = await sb.readFile("/tmp/app.ts");
+const data = await sb.readFile("/tmp/app.ts"); // Uint8Array
+const text = new TextDecoder().decode(data);
 
 await sb.checkpoint("my-env"); // saves disk state and stops the VM
 ```
@@ -65,13 +66,13 @@ Boot a new microVM. Returns when the VM is ready.
 
 Run a shell command in the VM. Returns `{ stdout, stderr, exitCode }`.
 
-### `sandbox.readFile(path): Promise<string>`
+### `sandbox.readFile(path): Promise<Uint8Array>`
 
-Read a file from the VM.
+Read a file from the VM. Returns raw bytes. Use `new TextDecoder().decode(data)` for text files.
 
-### `sandbox.writeFile(path, content): Promise<void>`
+### `sandbox.writeFile(path, content: Uint8Array | string): Promise<void>`
 
-Write a file to the VM.
+Write a file to the VM. Accepts raw bytes or a string.
 
 ### `sandbox.checkpoint(name): Promise<void>`
 
