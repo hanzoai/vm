@@ -35,6 +35,7 @@ pub struct VmConfigBuilder {
     cpus: usize,
     memory_mb: u64,
     console: bool,
+    verbose: bool,
     allow_net: bool,
     mounts: Vec<MountConfig>,
 }
@@ -48,6 +49,7 @@ impl VmConfigBuilder {
             cpus: 2,
             memory_mb: 2048,
             console: true,
+            verbose: false,
             allow_net: false,
             mounts: Vec::new(),
         }
@@ -58,6 +60,13 @@ impl VmConfigBuilder {
     /// in exec/shell mode.
     pub fn console(mut self, enabled: bool) -> Self {
         self.console = enabled;
+        self
+    }
+
+    /// When true, serial console output (kernel dmesg, initramfs) is shown
+    /// even in non-console mode. Default is false (quiet).
+    pub fn verbose(mut self, enabled: bool) -> Self {
+        self.verbose = enabled;
         self
     }
 
@@ -116,13 +125,18 @@ impl VmConfigBuilder {
         let memory_bytes = self.memory_mb * 1024 * 1024;
         let config = VirtualMachineConfiguration::new(&boot_loader, self.cpus, memory_bytes);
 
+        let dev_null; // keep the File alive so the fd stays valid
         let serial_attachment = if self.console {
             FileHandleSerialAttachment::new(
                 std::io::stdin().as_raw_fd(),
                 std::io::stdout().as_raw_fd(),
             )
-        } else {
+        } else if self.verbose {
             FileHandleSerialAttachment::new_write_only(std::io::stderr().as_raw_fd())
+        } else {
+            dev_null = std::fs::File::open("/dev/null")
+                .map_err(|e| anyhow::anyhow!("failed to open /dev/null: {}", e))?;
+            FileHandleSerialAttachment::new_write_only(dev_null.as_raw_fd())
         };
         let serial = VirtioConsoleSerialPort::new_with_attachment(&serial_attachment);
         config.set_serial_ports(&[serial]);

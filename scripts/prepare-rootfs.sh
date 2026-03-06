@@ -7,7 +7,7 @@ ROOTFS_IMG="${DATA_DIR}/rootfs.ext4"
 KERNEL_PATH="${DATA_DIR}/Image"
 INITRAMFS_PATH="${DATA_DIR}/initramfs.cpio.gz"
 GUEST_BINARY="target/aarch64-unknown-linux-musl/release/shuru-guest"
-ROOTFS_SIZE_MB=1024
+ROOTFS_SIZE_MB=4096
 
 echo "==> Shuru rootfs preparation script"
 echo "    Debian ${DEBIAN_RELEASE} (kernel + rootfs)"
@@ -107,8 +107,9 @@ DHCPEOF
             done
 
             # e2fsck + resize2fs for journal recovery and filesystem resize
+            # -L dereferences symlinks so versioned .so targets get copied
             lddtree -l /sbin/e2fsck /usr/sbin/resize2fs | sort -u \
-                | cpio --quiet -pdm /initramfs
+                | cpio --quiet -pmdL /initramfs
 
             # Copy needed modules (only those not built-in)
             echo "Copying kernel modules..."
@@ -185,7 +186,7 @@ if [ ! -b /dev/vda ]; then
 fi
 
 echo "initramfs: resizing filesystem..."
-/sbin/e2fsck -fy /dev/vda > /dev/null 2>&1 || true
+/sbin/e2fsck -p /dev/vda > /dev/null 2>&1 || true
 /usr/sbin/resize2fs /dev/vda > /dev/null 2>&1 || true
 
 echo "initramfs: mounting /dev/vda..."

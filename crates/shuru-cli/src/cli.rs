@@ -41,6 +41,10 @@ pub(crate) struct VmArgs {
     /// Path to config file (default: ./shuru.json)
     #[arg(long)]
     pub config: Option<String>,
+
+    /// Show verbose output (kernel boot, init messages)
+    #[arg(short = 'v', long)]
+    pub verbose: bool,
 }
 
 #[derive(Parser)]

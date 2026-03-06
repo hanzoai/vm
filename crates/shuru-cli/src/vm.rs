@@ -38,6 +38,7 @@ pub(crate) struct PreparedVm {
     pub memory: u64,
     pub disk_size: u64,
     pub allow_net: bool,
+    pub verbose: bool,
     pub forwards: Vec<PortMapping>,
     pub mounts: Vec<MountConfig>,
 }
@@ -51,6 +52,7 @@ pub(crate) fn prepare_vm(
     let memory = vm.memory.or(cfg.memory).unwrap_or(2048);
     let disk_size = vm.disk_size.or(cfg.disk_size).unwrap_or(4096);
     let allow_net = vm.allow_net || cfg.allow_net.unwrap_or(false);
+    let verbose = vm.verbose;
 
     // Merge port forwards: CLI flags + config file
     let mut port_strs: Vec<&str> = vm.port.iter().map(|s| s.as_str()).collect();
@@ -136,14 +138,27 @@ pub(crate) fn prepare_vm(
     let instance_dir = format!("{}/instances/{}", data_dir, std::process::id());
     std::fs::create_dir_all(&instance_dir)?;
     let work_rootfs = format!("{}/rootfs.ext4", instance_dir);
-    eprintln!("shuru: creating working copy...");
+    if verbose {
+        eprintln!("shuru: creating working copy...");
+    }
     clone_file(&source, &work_rootfs)?;
 
     // Extend to requested disk size
     let f = std::fs::OpenOptions::new()
         .write(true)
         .open(&work_rootfs)?;
-    f.set_len(disk_size * 1024 * 1024)?;
+    let target = disk_size * 1024 * 1024;
+    let current = f.metadata()?.len();
+    if target < current {
+        bail!(
+            "--disk-size {}MB is smaller than the base image ({}MB)",
+            disk_size,
+            current / 1024 / 1024
+        );
+    }
+    if target > current {
+        f.set_len(target)?;
+    }
     drop(f);
 
     let initrd_path = if std::path::Path::new(&initrd_path_str).exists() {
@@ -165,6 +180,7 @@ pub(crate) fn prepare_vm(
         memory,
         disk_size,
         allow_net,
+        verbose,
         forwards,
         mounts,
     })
@@ -177,7 +193,8 @@ pub(crate) fn build_sandbox(prepared: &PreparedVm, console: bool) -> Result<Sand
         .cpus(prepared.cpus)
         .memory_mb(prepared.memory)
         .allow_net(prepared.allow_net)
-        .console(console);
+        .console(console)
+        .verbose(prepared.verbose);
 
     if let Some(initrd) = &prepared.initrd_path {
         builder = builder.initrd(initrd);
@@ -191,20 +208,24 @@ pub(crate) fn build_sandbox(prepared: &PreparedVm, console: bool) -> Result<Sand
 }
 
 pub(crate) fn run_command(prepared: &PreparedVm, command: &[String]) -> Result<i32> {
-    eprintln!("shuru: kernel={}", prepared.kernel_path);
-    eprintln!("shuru: rootfs={} (work copy)", prepared.work_rootfs);
+    if prepared.verbose {
+        eprintln!("shuru: kernel={}", prepared.kernel_path);
+        eprintln!("shuru: rootfs={} (work copy)", prepared.work_rootfs);
+    }
     eprintln!(
         "shuru: booting VM ({}cpus, {}MB RAM, {}MB disk)...",
         prepared.cpus, prepared.memory, prepared.disk_size
     );
 
     let sandbox = build_sandbox(prepared, false)?;
-    eprintln!("shuru: VM created and validated successfully");
+    if prepared.verbose {
+        eprintln!("shuru: VM created and validated successfully");
+    }
 
-    eprintln!("shuru: starting VM...");
     sandbox.start()?;
-    eprintln!("shuru: VM started");
-    eprintln!("shuru: waiting for guest to be ready...");
+    if prepared.verbose {
+        eprintln!("shuru: VM started, waiting for guest...");
+    }
 
     let _fwd = if !prepared.forwards.is_empty() {
         Some(sandbox.start_port_forwarding(&prepared.forwards)?)
