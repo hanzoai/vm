@@ -22,8 +22,11 @@ jobs:
         with:
           targets: aarch64-unknown-linux-musl
 
-      - name: Install musl toolchain
-        run: sudo apt-get update && sudo apt-get install -y musl-tools
+      - name: Install musl toolchain and kernel build deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y musl-tools build-essential bc flex bison \
+            libelf-dev libssl-dev wget xz-utils
 
       - name: Build shuru-guest
         env:

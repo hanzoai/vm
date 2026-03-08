@@ -120,7 +120,12 @@ impl VmConfigBuilder {
             boot_loader.set_initrd(initrd);
         }
 
-        boot_loader.set_command_line("console=hvc0 root=/dev/vda rw");
+        let cmdline = if self.verbose {
+            "console=hvc0 root=/dev/vda rw"
+        } else {
+            "console=hvc0 root=/dev/vda rw quiet"
+        };
+        boot_loader.set_command_line(cmdline);
 
         let memory_bytes = self.memory_mb * 1024 * 1024;
         let config = VirtualMachineConfiguration::new(&boot_loader, self.cpus, memory_bytes);
@@ -539,7 +544,7 @@ impl Sandbox {
 
     fn connect_vsock(&self) -> Result<TcpStream> {
         let state_rx = self.vm.state_channel();
-        for attempt in 1..=10 {
+        for attempt in 1..=50 {
             // Check if VM died (e.g. guest mount failure -> reboot POWER_OFF)
             if let Ok(state) = state_rx.try_recv() {
                 match state {
@@ -556,11 +561,11 @@ impl Sandbox {
                     return Ok(s);
                 }
                 Err(e) => {
-                    if attempt == 10 {
-                        bail!("Failed to connect to guest after 10 attempts: {}", e);
+                    if attempt == 50 {
+                        bail!("Failed to connect to guest after {} attempts: {}", attempt, e);
                     }
                     tracing::debug!("vsock connect attempt {} failed: {}", attempt, e);
-                    std::thread::sleep(Duration::from_secs(1));
+                    std::thread::sleep(Duration::from_millis(200));
                 }
             }
         }
