@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.3.0
+## 0.3.0 (unreleased)
 
 ### Custom minimal kernel, faster boot
 
@@ -9,11 +9,9 @@ Boot time reduced from ~5s to ~1s by replacing the Debian cloud kernel with a cu
 **What changed:**
 
 - Custom kernel built from `kernel/shuru_defconfig` with all VirtIO drivers built-in (~8MB, no loadable modules)
-- Simplified initramfs (no module loading, no DHCP, no device polling)
+- Simplified initramfs with no loadable modules
 - Quiet boot by default, use `--verbose` to see kernel output
-- Faster vsock connection (50x200ms retries instead of 10x1s)
 - Re-enabled ext4 journal for data integrity
-- Added `scripts/build-kernel.sh` for Docker-based kernel builds with native aarch64 fallback
 
 **Note:** Existing checkpoints created with 0.2.x will continue to work.
 
