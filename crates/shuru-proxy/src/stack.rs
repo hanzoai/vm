@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::os::unix::io::RawFd;
 
@@ -67,6 +67,7 @@ pub struct NetworkStack {
     dns_handle: SocketHandle,
     connections: HashMap<SocketHandle, SocketAddr>,
     listening: HashMap<(Ipv4Address, u16), SocketHandle>,
+    pending_send: HashMap<SocketHandle, VecDeque<u8>>,
     event_tx: mpsc::UnboundedSender<StackEvent>,
     cmd_rx: mpsc::UnboundedReceiver<StackCommand>,
 }
@@ -113,6 +114,7 @@ impl NetworkStack {
             dns_handle,
             connections: HashMap::new(),
             listening: HashMap::new(),
+            pending_send: HashMap::new(),
             event_tx,
             cmd_rx,
         }
@@ -131,6 +133,7 @@ impl NetworkStack {
                 .poll(Self::now(), &mut self.device, &mut self.sockets);
 
             self.poll_tcp_sockets();
+            self.drain_pending_sends();
             self.poll_dns_socket();
 
             let delay = self
@@ -154,17 +157,16 @@ impl NetworkStack {
         while let Ok(cmd) = self.cmd_rx.try_recv() {
             match cmd {
                 StackCommand::Send { id, payload } => {
-                    let socket = self.sockets.get_mut::<TcpSocket>(id.0);
-                    if socket.can_send() {
-                        if let Err(e) = socket.send_slice(&payload) {
-                            warn!("failed to send to guest: {e}");
-                        }
-                    }
+                    self.pending_send
+                        .entry(id.0)
+                        .or_default()
+                        .extend(&payload);
                 }
                 StackCommand::Close { id } => {
                     let socket = self.sockets.get_mut::<TcpSocket>(id.0);
                     socket.close();
                     self.connections.remove(&id.0);
+                    self.pending_send.remove(&id.0);
                 }
                 StackCommand::DnsResponse { dst, payload } => {
                     let socket = self.sockets.get_mut::<UdpSocket>(self.dns_handle);
@@ -233,6 +235,33 @@ impl NetworkStack {
         Some((ipv4.dst_addr(), tcp.dst_port()))
     }
 
+    fn drain_pending_sends(&mut self) {
+        let handles: Vec<SocketHandle> = self.pending_send.keys().copied().collect();
+        for handle in handles {
+            let socket = self.sockets.get_mut::<TcpSocket>(handle);
+            if !socket.can_send() {
+                continue;
+            }
+            if let Some(pending) = self.pending_send.get_mut(&handle) {
+                let (a, b) = pending.as_slices();
+                let slice = if !a.is_empty() { a } else { b };
+                if slice.is_empty() {
+                    continue;
+                }
+                match socket.send_slice(slice) {
+                    Ok(n) if n > 0 => {
+                        pending.drain(..n);
+                    }
+                    Err(e) => {
+                        warn!("failed to send to guest: {e}");
+                        pending.clear();
+                    }
+                    _ => {}
+                }
+            }
+        }
+    }
+
     fn poll_tcp_sockets(&mut self) {
         let handles: Vec<SocketHandle> = self
             .listening
@@ -289,6 +318,7 @@ impl NetworkStack {
                 && !socket.may_send()
             {
                 self.connections.remove(&handle);
+                self.pending_send.remove(&handle);
                 let _ = self.event_tx.send(StackEvent::Closed {
                     id: ConnectionId(handle),
                 });

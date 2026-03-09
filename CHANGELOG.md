@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.3.2
+
+- Fixed proxy corrupting large HTTP responses (e.g. `apt-get update`) due to dropped bytes when smoltcp TX buffer was full
+
 ## 0.3.1
 
 - Fixed TLS certificate validation failures by syncing guest clock from host via kernel cmdline
