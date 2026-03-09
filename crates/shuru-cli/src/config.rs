@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use anyhow::{bail, Result};
 use serde::Deserialize;
 
@@ -10,6 +12,52 @@ pub(crate) struct ShuruConfig {
     pub ports: Option<Vec<String>>,
     pub mounts: Option<Vec<String>>,
     pub command: Option<Vec<String>>,
+    pub secrets: Option<HashMap<String, SecretEntry>>,
+    pub network: Option<NetworkEntry>,
+}
+
+/// A secret to inject via the proxy.
+/// Example: `{ "from": "OPENAI_API_KEY", "hosts": ["api.openai.com"] }`
+#[derive(Debug, Clone, Deserialize)]
+pub(crate) struct SecretEntry {
+    /// Host environment variable containing the real value.
+    pub from: String,
+    /// Domains where this secret may be sent.
+    pub hosts: Vec<String>,
+}
+
+/// Network access policy.
+#[derive(Debug, Clone, Default, Deserialize)]
+pub(crate) struct NetworkEntry {
+    /// Allowed domain patterns. Empty or absent = allow all.
+    pub allow: Option<Vec<String>>,
+}
+
+impl ShuruConfig {
+    /// Convert config sections into a ProxyConfig for shuru-proxy.
+    pub fn to_proxy_config(&self) -> shuru_proxy::config::ProxyConfig {
+        let mut proxy = shuru_proxy::config::ProxyConfig::default();
+
+        if let Some(ref secrets) = self.secrets {
+            for (name, entry) in secrets {
+                proxy.secrets.insert(
+                    name.clone(),
+                    shuru_proxy::config::SecretConfig {
+                        from: entry.from.clone(),
+                        hosts: entry.hosts.clone(),
+                    },
+                );
+            }
+        }
+
+        if let Some(ref network) = self.network {
+            if let Some(ref allow) = network.allow {
+                proxy.network.allow = allow.clone();
+            }
+        }
+
+        proxy
+    }
 }
 
 pub(crate) fn load_config(config_flag: Option<&str>) -> Result<ShuruConfig> {

@@ -152,7 +152,7 @@ macro_rules! parse_params {
 pub(crate) fn run_stdio(prepared: &PreparedVm) -> Result<i32> {
     let mut out = io::stdout().lock();
 
-    let sandbox = vm::build_sandbox(prepared, false)?;
+    let sandbox = vm::build_sandbox(prepared, false, None)?;
     sandbox.start()?;
 
     let _fwd = if !prepared.forwards.is_empty() {

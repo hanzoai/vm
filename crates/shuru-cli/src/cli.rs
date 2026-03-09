@@ -26,7 +26,7 @@ pub(crate) struct VmArgs {
     #[arg(long, env = "SHURU_INITRD")]
     pub initrd: Option<String>,
 
-    /// Allow network access (NAT)
+    /// Allow network access
     #[arg(long)]
     pub allow_net: bool,
 

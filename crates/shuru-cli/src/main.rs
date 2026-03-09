@@ -46,16 +46,16 @@ fn main() -> Result<()> {
 
             let prepared = vm::prepare_vm(&vm, &cfg, from.as_deref())?;
 
-            let exit_code = if stdio {
-                stdio::run_stdio(&prepared)?
+            let result = if stdio {
+                stdio::run_stdio(&prepared)
             } else if console {
-                run_console(&prepared)?
+                run_console(&prepared)
             } else {
-                vm::run_command(&prepared, &command)?
+                vm::run_command(&prepared, &command)
             };
 
             let _ = std::fs::remove_dir_all(&prepared.instance_dir);
-            process::exit(exit_code);
+            process::exit(result?);
         }
         Commands::Init { force } => {
             let data_dir = default_data_dir();
@@ -141,7 +141,7 @@ fn run_console(prepared: &vm::PreparedVm) -> Result<i32> {
         prepared.cpus, prepared.memory, prepared.disk_size
     );
 
-    let sandbox = vm::build_sandbox(prepared, true)?;
+    let sandbox = vm::build_sandbox(prepared, true, None)?;
     eprintln!("shuru: VM created and validated successfully");
 
     let state_rx = sandbox.state_channel();

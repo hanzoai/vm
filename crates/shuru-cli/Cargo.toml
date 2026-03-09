@@ -9,6 +9,7 @@ path = "src/main.rs"
 
 [dependencies]
 shuru-vm = { path = "../shuru-vm" }
+shuru-proxy = { path = "../shuru-proxy" }
 clap = { version = "4", features = ["derive", "env"] }
 anyhow = "1"
 libc = "0.2"

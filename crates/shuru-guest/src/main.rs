@@ -144,7 +144,7 @@ mod guest {
     }
 
     // --- Networking setup ---
-    // DHCP is handled by udhcpc in the initramfs before switch_root.
+    // Network is configured by initramfs before switch_root (static IP for proxy).
     // By the time we get here, eth0 already has an IP if --allow-net was used.
 
     fn setup_networking() {
@@ -174,7 +174,7 @@ mod guest {
                 return;
             }
 
-            // Check if eth0 already has an IP (configured by initramfs DHCP)
+            // Check if eth0 already has an IP (configured by initramfs)
             let has_ip = {
                 let mut ifr: libc::ifreq = std::mem::zeroed();
                 std::ptr::copy_nonoverlapping(

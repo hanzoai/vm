@@ -101,9 +101,22 @@ Shuru loads `shuru.json` from the current directory (or `--config PATH`). All fi
   "allow_net": true,
   "ports": ["8080:80"],
   "mounts": ["./src:/workspace", "./data:/data"],
-  "command": ["python", "script.py"]
+  "command": ["python", "script.py"],
+  "secrets": {
+    "API_KEY": {
+      "from": "OPENAI_API_KEY",
+      "hosts": ["api.openai.com"]
+    }
+  },
+  "network": {
+    "allow": ["api.openai.com", "registry.npmjs.org"]
+  }
 }
 ```
+
+When `secrets` are configured, the guest receives a random placeholder token (e.g. `$API_KEY=shuru_tok_...`). The proxy substitutes the real value only on HTTPS requests to the specified hosts. The real secret never enters the VM.
+
+The `network.allow` list restricts which domains the guest can reach. Omit it to allow all domains.
 
 ## SDK
 
@@ -139,30 +152,6 @@ cp -r skills/shuru .claude/skills/shuru
 ```
 
 Once installed, agents will use `shuru run` whenever they need sandboxed execution.
-
-## Architecture
-
-```
-┌─────────────────────────────────────────────┐
-│  macOS Host                                 │
-│                                             │
-│  shuru-cli ──► shuru-vm ──► shuru-darwin    │
-│                   │      (Virtualization.framework)
-│                   │                         │
-│         ┌────────┼─────────┐                │
-│         │ vsock :1024 exec │                │
-│         │ vsock :1025 fwd  │                │
-│         │ virtiofs  mounts │                │
-│         └────────┼─────────┘                │
-├──────────────────┼──────────────────────────┤
-│  Linux Guest     │                          │
-│         ┌────────┴─────────┐                │
-│         │   shuru-guest    │                │
-│         │   (PID 1 init)   │                │
-│         └──────────────────┘                │
-│  Debian GNU/Linux 13 (trixie)               │
-└─────────────────────────────────────────────┘
-```
 
 ## Changelog
 

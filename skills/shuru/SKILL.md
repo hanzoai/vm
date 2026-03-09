@@ -160,14 +160,23 @@ Place `shuru.json` in the project root to avoid repeating flags:
   "cpus": 2,
   "memory": 2048,
   "disk_size": 4096,
-  "allow_net": false,
+  "allow_net": true,
   "ports": ["8080:80"],
   "mounts": ["./src:/workspace"],
-  "command": ["/bin/sh", "-c", "cd /workspace && sh"]
+  "command": ["/bin/sh", "-c", "cd /workspace && sh"],
+  "secrets": {
+    "API_KEY": {
+      "from": "OPENAI_API_KEY",
+      "hosts": ["api.openai.com"]
+    }
+  },
+  "network": {
+    "allow": ["api.openai.com", "registry.npmjs.org"]
+  }
 }
 ```
 
-CLI flags override config values. See [references/config.md](references/config.md) for all fields.
+CLI flags override config values. When `secrets` are configured, the guest receives placeholder tokens and the proxy substitutes real values on HTTPS requests to allowed hosts. See [references/config.md](references/config.md) for all fields.
 
 ## Important Constraints
 

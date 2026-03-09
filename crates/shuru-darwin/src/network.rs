@@ -1,27 +1,45 @@
+use std::os::unix::io::RawFd;
+
 use objc2::rc::Retained;
 use objc2::AnyThread;
+use objc2_foundation::NSFileHandle;
 use objc2_virtualization::{
-    VZMACAddress, VZNATNetworkDeviceAttachment, VZNetworkDeviceAttachment,
+    VZFileHandleNetworkDeviceAttachment, VZMACAddress, VZNetworkDeviceAttachment,
     VZNetworkDeviceConfiguration, VZVirtioNetworkDeviceConfiguration,
 };
 
-pub struct NATNetworkAttachment {
-    inner: Retained<VZNATNetworkDeviceAttachment>,
+pub trait NetworkAttachment {
+    fn as_vz_attachment(&self) -> Retained<VZNetworkDeviceAttachment>;
 }
 
-impl NATNetworkAttachment {
-    pub fn new() -> Self {
-        NATNetworkAttachment {
-            inner: unsafe {
-                VZNATNetworkDeviceAttachment::init(VZNATNetworkDeviceAttachment::alloc())
-            },
+pub struct FileHandleNetworkAttachment {
+    inner: Retained<VZFileHandleNetworkDeviceAttachment>,
+}
+
+impl FileHandleNetworkAttachment {
+    /// Creates a network attachment from a connected datagram socket fd.
+    /// The fd should be one end of `socketpair(AF_UNIX, SOCK_DGRAM)`.
+    /// VZ takes ownership of this fd (closes on dealloc).
+    pub fn new(fd: RawFd) -> Self {
+        unsafe {
+            let file_handle = NSFileHandle::initWithFileDescriptor_closeOnDealloc(
+                NSFileHandle::alloc(),
+                fd,
+                true,
+            );
+            FileHandleNetworkAttachment {
+                inner: VZFileHandleNetworkDeviceAttachment::initWithFileHandle(
+                    VZFileHandleNetworkDeviceAttachment::alloc(),
+                    &file_handle,
+                ),
+            }
         }
     }
 }
 
-impl Default for NATNetworkAttachment {
-    fn default() -> Self {
-        Self::new()
+impl NetworkAttachment for FileHandleNetworkAttachment {
+    fn as_vz_attachment(&self) -> Retained<VZNetworkDeviceAttachment> {
+        unsafe { Retained::cast_unchecked(self.inner.clone()) }
     }
 }
 
@@ -64,17 +82,15 @@ impl VirtioNetworkDevice {
         }
     }
 
-    pub fn new_with_attachment(attachment: &NATNetworkAttachment) -> Self {
+    pub fn new_with_attachment(attachment: &impl NetworkAttachment) -> Self {
         let config = Self::new();
         config.set_attachment(attachment);
         config
     }
 
-    pub fn set_attachment(&self, attachment: &NATNetworkAttachment) {
+    pub fn set_attachment(&self, attachment: &impl NetworkAttachment) {
         unsafe {
-            let id: Retained<VZNetworkDeviceAttachment> =
-                Retained::cast_unchecked(attachment.inner.clone());
-            self.inner.setAttachment(Some(&id));
+            self.inner.setAttachment(Some(&attachment.as_vz_attachment()));
         }
     }
 

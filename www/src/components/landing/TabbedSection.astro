@@ -1,0 +1,154 @@
+---
+interface Tab {
+  id: string;
+  label?: string;
+  title: string;
+  description: string;
+}
+
+interface Props {
+  id: string;
+  tabs: Tab[];
+  terminalTitle: string;
+  defaultTab?: string;
+  useHash?: boolean;
+}
+
+const { id, tabs, terminalTitle, defaultTab, useHash = false } = Astro.props;
+const activeId = defaultTab || tabs[0]?.id;
+---
+
+<div class="grid gap-0 border border-border md:grid-cols-[1fr_1.6fr]" data-tabbed-section={id} data-default={activeId} data-use-hash={useHash ? "true" : "false"}>
+  <!-- Tabs (left) -->
+  <div class="border-b border-border md:border-b-0 md:border-r">
+    {tabs.map((tab, i) => (
+      <a
+        href={`#${tab.id}`}
+        class:list={[
+          "tabbed-tab block p-5 md:p-6",
+          i < tabs.length - 1 && "border-b border-border",
+        ]}
+        data-tab={tab.id}
+      >
+        {tab.label && <div class="mb-1 font-mono text-[10px] uppercase tracking-widest text-dim">{tab.label}</div>}
+        <h3 class="text-sm font-semibold">{tab.title}</h3>
+        <p class="mt-1 text-xs leading-relaxed text-muted">{tab.description}</p>
+      </a>
+    ))}
+  </div>
+
+  <!-- Content (right) -->
+  <div class="flex flex-col">
+    <div class="flex items-center gap-2 border-b border-border px-4 py-2.5">
+      <span class="h-2.5 w-2.5 border border-[#ff5f57] bg-[#ff5f57]/20"></span>
+      <span class="h-2.5 w-2.5 border border-[#febc2e] bg-[#febc2e]/20"></span>
+      <span class="h-2.5 w-2.5 border border-[#28c840] bg-[#28c840]/20"></span>
+      <span class="ml-2 font-mono text-[10px] text-dim">{terminalTitle}</span>
+    </div>
+    <div class="relative flex-1">
+      <slot />
+    </div>
+  </div>
+</div>
+
+<style>
+  .tabbed-tab {
+    cursor: pointer;
+    transition: background-color 0.15s ease, border-color 0.15s ease;
+    border-left: 2px solid transparent;
+    text-decoration: none;
+    color: inherit;
+  }
+
+  .tabbed-tab:hover {
+    background: rgba(255, 255, 255, 0.02);
+  }
+
+  .tabbed-tab.active {
+    border-left-color: var(--color-amber, #f59e0b);
+    background: rgba(255, 255, 255, 0.03);
+  }
+
+  :global(.tabbed-panel) {
+    display: none;
+    animation: tabbedFade 0.2s ease;
+  }
+
+  :global(.tabbed-panel.active) {
+    display: block;
+  }
+
+  @keyframes tabbedFade {
+    from { opacity: 0; }
+    to { opacity: 1; }
+  }
+</style>
+
+<script>
+  function initTabbedSections() {
+    document.querySelectorAll<HTMLElement>('[data-tabbed-section]').forEach((section) => {
+      const id = section.dataset.tabbedSection!;
+      const defaultTab = section.dataset.default!;
+      const useHash = section.dataset.useHash === 'true';
+
+      const tabs = section.querySelectorAll<HTMLElement>('.tabbed-tab');
+      const panels = section.querySelectorAll<HTMLElement>('.tabbed-panel');
+
+      // Set min-height to tallest panel to prevent layout shift
+      const container = section.querySelector<HTMLElement>('.relative.flex-1');
+      if (container) {
+        let maxH = 0;
+        panels.forEach((p) => {
+          p.style.display = 'block';
+          p.style.visibility = 'hidden';
+          p.style.position = 'absolute';
+          maxH = Math.max(maxH, p.offsetHeight);
+          p.style.display = '';
+          p.style.visibility = '';
+          p.style.position = '';
+        });
+        if (maxH > 0) container.style.minHeight = `${maxH}px`;
+      }
+
+      function activate(tabId: string) {
+        tabs.forEach((t) => t.classList.remove('active'));
+        panels.forEach((p) => p.classList.remove('active'));
+
+        section.querySelector(`.tabbed-tab[data-tab="${tabId}"]`)?.classList.add('active');
+        section.querySelector(`.tabbed-panel[data-panel="${tabId}"]`)?.classList.add('active');
+      }
+
+      // Initial activation
+      if (useHash) {
+        const hash = window.location.hash.replace('#', '');
+        const validIds = Array.from(tabs).map((t) => t.dataset.tab);
+        activate(validIds.includes(hash) ? hash : defaultTab);
+      } else {
+        activate(defaultTab);
+      }
+
+      // Tab clicks
+      tabs.forEach((tab) => {
+        tab.addEventListener('click', (e) => {
+          e.preventDefault();
+          const tabId = tab.dataset.tab;
+          if (tabId) {
+            activate(tabId);
+            if (useHash) history.replaceState(null, '', `#${tabId}`);
+          }
+        });
+      });
+
+      // Hash navigation (only for hash-enabled sections)
+      if (useHash) {
+        window.addEventListener('hashchange', () => {
+          const hash = window.location.hash.replace('#', '');
+          const validIds = Array.from(tabs).map((t) => t.dataset.tab);
+          if (validIds.includes(hash)) activate(hash);
+        });
+      }
+    });
+  }
+
+  initTabbedSections();
+</script>

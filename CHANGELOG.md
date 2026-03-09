@@ -6,12 +6,19 @@
 
 Boot time reduced from ~5s to ~1s by replacing the Debian cloud kernel with a custom minimal Linux 6.12.x kernel.
 
-**What changed:**
-
 - Custom kernel built from `kernel/shuru_defconfig` with all VirtIO drivers built-in (~8MB, no loadable modules)
-- Simplified initramfs with no loadable modules
+- Simplified initramfs with no module loading, no DHCP, no /dev/vda polling
 - Quiet boot by default, use `--verbose` to see kernel output
-- Re-enabled ext4 journal for data integrity
+
+### Proxy-based networking
+
+All guest network traffic now flows through a userspace proxy on the host. No NAT device, no direct internet access.
+
+- Domain allowlists via `shuru.json`
+- Secret injection: API keys stay on host, placeholder tokens swapped at proxy
+- MITM TLS only when secrets need to be injected; blind-tunneled otherwise
+- Fixed placeholder token collision with atomic counter
+- Instance directory cleanup on error and PID reuse
 
 **Note:** Existing checkpoints created with 0.2.x will continue to work.
 

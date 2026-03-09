@@ -6,7 +6,7 @@ mod configuration;
 mod directory_sharing;
 mod entropy;
 mod memory;
-mod network;
+pub mod network;
 mod serial;
 mod socket;
 mod storage;
@@ -19,7 +19,7 @@ pub use configuration::VirtualMachineConfiguration;
 pub use directory_sharing::{SharedDirectory, VirtioFileSystemDevice};
 pub use entropy::VirtioEntropyDevice;
 pub use memory::VirtioMemoryBalloonDevice;
-pub use network::{NATNetworkAttachment, MACAddress, VirtioNetworkDevice};
+pub use network::{FileHandleNetworkAttachment, MACAddress, VirtioNetworkDevice};
 pub use serial::{FileHandleSerialAttachment, VirtioConsoleSerialPort};
 pub use socket::VirtioSocketDevice;
 pub use storage::{

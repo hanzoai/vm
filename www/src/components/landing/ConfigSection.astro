@@ -1,0 +1,139 @@
+---
+import CopyButton from "./CopyButton.astro";
+import TabbedSection from "./TabbedSection.astro";
+
+const configs: Record<string, string> = {
+  "secret-injection": JSON.stringify({
+    secrets: { API_KEY: { from: "OPENAI_API_KEY", hosts: ["api.openai.com"] } },
+    network: { allow: ["api.openai.com"] },
+  }, null, 2),
+  "domain-allowlist": JSON.stringify({
+    network: { allow: ["registry.npmjs.org", "github.com", "*.githubusercontent.com"] },
+  }, null, 2),
+  "multi-provider": JSON.stringify({
+    secrets: {
+      OPENAI_KEY: { from: "OPENAI_API_KEY", hosts: ["api.openai.com"] },
+      ANTHROPIC_KEY: { from: "ANTHROPIC_API_KEY", hosts: ["api.anthropic.com"] },
+    },
+    network: { allow: ["api.openai.com", "api.anthropic.com"] },
+  }, null, 2),
+  "full-config": JSON.stringify({
+    cpus: 4, memory: 4096, mounts: ["./src:/workspace"],
+    secrets: { API_KEY: { from: "OPENAI_API_KEY", hosts: ["api.openai.com"] } },
+    network: { allow: ["api.openai.com"] },
+  }, null, 2),
+};
+
+const tabs = [
+  {
+    id: "secret-injection",
+    label: "config",
+    title: "Secret injection",
+    description: "API key stays on host. Guest gets a placeholder token.",
+  },
+  {
+    id: "domain-allowlist",
+    title: "Domain allowlist",
+    description: "Lock down which domains the agent can reach.",
+  },
+  {
+    id: "multi-provider",
+    title: "Multi-provider",
+    description: "Multiple API keys for different services.",
+  },
+  {
+    id: "full-config",
+    title: "Full config",
+    description: "Resources, mounts, secrets, and network together.",
+  },
+];
+---
+
+<section class="relative border-x border-border">
+  <span class="section-label">Config</span>
+
+  <div class="border-b border-dashed border-border px-8 pt-16 pb-16 md:px-16 md:pt-24 md:pb-24">
+    <h2 class="text-2xl font-semibold tracking-tight md:text-4xl lg:text-5xl">
+      Configure per project.
+      <br />
+      <span class="text-muted">One file, full control.</span>
+    </h2>
+
+    <p class="mt-6 max-w-2xl text-sm leading-relaxed text-muted">
+      Define allowed domains, secrets, and resources in a single <span class="font-mono text-text">shuru.json</span> file.
+    </p>
+
+    <div class="mt-12">
+      <TabbedSection id="cfg" tabs={tabs} terminalTitle="shuru.json">
+        <!-- Secret injection -->
+        <div class="tabbed-panel relative p-5 font-mono text-xs leading-[1.8] md:p-6 md:text-sm" data-panel="secret-injection">
+          <CopyButton text={configs["secret-injection"]} />
+          <p class="text-text">{"{"}</p>
+          <p class="text-text pl-4">"secrets": {"{"}</p>
+          <p class="text-text pl-8">"API_KEY": {"{"}</p>
+          <p class="text-amber bg-amber/5 -mx-2 px-2 pl-12">"from": "OPENAI_API_KEY",</p>
+          <p class="text-amber bg-amber/5 -mx-2 px-2 pl-12">"hosts": ["api.openai.com"]</p>
+          <p class="text-text pl-8">{"}"}</p>
+          <p class="text-text pl-4">{"}"},</p>
+          <p class="text-text pl-4">"network": {"{"}</p>
+          <p class="text-amber bg-amber/5 -mx-2 px-2 pl-8">"allow": ["api.openai.com"]</p>
+          <p class="text-text pl-4">{"}"}</p>
+          <p class="text-text">{"}"}</p>
+        </div>
+
+        <!-- Domain allowlist -->
+        <div class="tabbed-panel relative p-5 font-mono text-xs leading-[1.8] md:p-6 md:text-sm" data-panel="domain-allowlist">
+          <CopyButton text={configs["domain-allowlist"]} />
+          <p class="text-text">{"{"}</p>
+          <p class="text-text pl-4">"network": {"{"}</p>
+          <p class="text-amber bg-amber/5 -mx-2 px-2 pl-8">"allow": [</p>
+          <p class="text-amber bg-amber/5 -mx-2 px-2 pl-12">"registry.npmjs.org",</p>
+          <p class="text-amber bg-amber/5 -mx-2 px-2 pl-12">"github.com",</p>
+          <p class="text-amber bg-amber/5 -mx-2 px-2 pl-12">"*.githubusercontent.com"</p>
+          <p class="text-amber bg-amber/5 -mx-2 px-2 pl-8">]</p>
+          <p class="text-text pl-4">{"}"}</p>
+          <p class="text-text">{"}"}</p>
+        </div>
+
+        <!-- Multi-provider -->
+        <div class="tabbed-panel relative p-5 font-mono text-xs leading-[1.8] md:p-6 md:text-sm" data-panel="multi-provider">
+          <CopyButton text={configs["multi-provider"]} />
+          <p class="text-text">{"{"}</p>
+          <p class="text-text pl-4">"secrets": {"{"}</p>
+          <p class="text-text pl-8">"OPENAI_KEY": {"{"}</p>
+          <p class="text-amber bg-amber/5 -mx-2 px-2 pl-12">"from": "OPENAI_API_KEY",</p>
+          <p class="text-amber bg-amber/5 -mx-2 px-2 pl-12">"hosts": ["api.openai.com"]</p>
+          <p class="text-text pl-8">{"}"},</p>
+          <p class="text-text pl-8">"ANTHROPIC_KEY": {"{"}</p>
+          <p class="text-amber bg-amber/5 -mx-2 px-2 pl-12">"from": "ANTHROPIC_API_KEY",</p>
+          <p class="text-amber bg-amber/5 -mx-2 px-2 pl-12">"hosts": ["api.anthropic.com"]</p>
+          <p class="text-text pl-8">{"}"}</p>
+          <p class="text-text pl-4">{"}"},</p>
+          <p class="text-text pl-4">"network": {"{"}</p>
+          <p class="text-amber bg-amber/5 -mx-2 px-2 pl-8">"allow": ["api.openai.com", "api.anthropic.com"]</p>
+          <p class="text-text pl-4">{"}"}</p>
+          <p class="text-text">{"}"}</p>
+        </div>
+
+        <!-- Full config -->
+        <div class="tabbed-panel relative p-5 font-mono text-xs leading-[1.8] md:p-6 md:text-sm" data-panel="full-config">
+          <CopyButton text={configs["full-config"]} />
+          <p class="text-text">{"{"}</p>
+          <p class="text-amber bg-amber/5 -mx-2 px-2 pl-4">"cpus": 4,</p>
+          <p class="text-amber bg-amber/5 -mx-2 px-2 pl-4">"memory": 4096,</p>
+          <p class="text-amber bg-amber/5 -mx-2 px-2 pl-4">"mounts": ["./src:/workspace"],</p>
+          <p class="text-text pl-4">"secrets": {"{"}</p>
+          <p class="text-text pl-8">"API_KEY": {"{"}</p>
+          <p class="text-text pl-12">"from": "OPENAI_API_KEY",</p>
+          <p class="text-text pl-12">"hosts": ["api.openai.com"]</p>
+          <p class="text-text pl-8">{"}"}</p>
+          <p class="text-text pl-4">{"}"},</p>
+          <p class="text-text pl-4">"network": {"{"}</p>
+          <p class="text-text pl-8">"allow": ["api.openai.com"]</p>
+          <p class="text-text pl-4">{"}"}</p>
+          <p class="text-text">{"}"}</p>
+        </div>
+      </TabbedSection>
+    </div>
+  </div>
+</section>

@@ -2,6 +2,17 @@
 
 Networking is **off by default**. Pass `--allow-net` to enable it.
 
+## How It Works
+
+All guest network traffic goes through a userspace proxy on the host (no NAT, no direct internet access). The proxy:
+
+- Resolves DNS on the host and relays responses
+- Tunnels TCP connections (HTTP and HTTPS) to the real internet
+- Optionally performs MITM on HTTPS to inject secrets (only when `secrets` are configured)
+- Enforces domain allowlists when `network.allow` is set
+
+ICMP (ping) is not supported — only TCP traffic is proxied.
+
 ## Enabling Network Access
 
 ```bash
@@ -16,15 +27,34 @@ Or set it in `shuru.json`:
 }
 ```
 
+## Domain Allowlist
+
+Restrict which domains the guest can reach:
+
+```json
+{
+  "allow_net": true,
+  "network": {
+    "allow": ["api.openai.com", "registry.npmjs.org", "*.github.com"]
+  }
+}
+```
+
+DNS queries for blocked domains return REFUSED. Omit `network.allow` to allow all domains.
+
+## Secret Injection
+
+See [config.md](config.md#secrets) for details on injecting API keys via the proxy.
+
 ## Port Forwarding
 
-Forward host ports to guest ports with `-p HOST:GUEST`:
+Forward host ports to guest ports with `-p HOST:GUEST`. Port forwarding uses vsock and works **without** `--allow-net`:
 
 ```bash
 # Forward host 8080 to guest 80
-shuru run --allow-net -p 8080:80 -- nginx -g 'daemon off;'
+shuru run -p 8080:80 -- python3 -m http.server 80
 
-# Multiple ports
+# With networking too
 shuru run --allow-net -p 3000:3000 -p 5432:5432 -- sh -c 'start-services.sh'
 ```
 
@@ -42,7 +72,7 @@ CLI `-p` flags are merged with config ports (not replaced).
 
 ## Without Networking
 
-When `--allow-net` is not set, the VM has no network interface. DNS resolution, HTTP requests, and package installs will fail. This is the intended default for maximum isolation.
+When `--allow-net` is not set, the VM has no network device. DNS resolution, HTTP requests, and package installs will fail. This is the intended default for maximum isolation.
 
 To install packages, either:
 1. Use `--allow-net` during the run

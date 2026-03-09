@@ -10,6 +10,7 @@ use anyhow::{bail, Context, Result};
 use crossbeam_channel::Receiver;
 
 use shuru_darwin::terminal;
+use shuru_darwin::network::FileHandleNetworkAttachment;
 use shuru_darwin::*;
 
 use shuru_proto::{
@@ -36,7 +37,7 @@ pub struct VmConfigBuilder {
     memory_mb: u64,
     console: bool,
     verbose: bool,
-    allow_net: bool,
+    network_fd: Option<i32>,
     mounts: Vec<MountConfig>,
 }
 
@@ -50,7 +51,7 @@ impl VmConfigBuilder {
             memory_mb: 2048,
             console: true,
             verbose: false,
-            allow_net: false,
+            network_fd: None,
             mounts: Vec::new(),
         }
     }
@@ -95,9 +96,9 @@ impl VmConfigBuilder {
         self
     }
 
-    /// Enable network access (NAT). Disabled by default for sandboxing.
-    pub fn allow_net(mut self, enabled: bool) -> Self {
-        self.allow_net = enabled;
+    /// Attach a network device via a socketpair fd for proxy-based networking.
+    pub fn network_fd(mut self, fd: i32) -> Self {
+        self.network_fd = Some(fd);
         self
     }
 
@@ -156,8 +157,8 @@ impl VmConfigBuilder {
         let block_device = VirtioBlockDevice::new(&disk_attachment);
         config.set_storage_devices(&[&block_device]);
 
-        if self.allow_net {
-            let net_attachment = NATNetworkAttachment::new();
+        if let Some(fd) = self.network_fd {
+            let net_attachment = FileHandleNetworkAttachment::new(fd);
             let net_device = VirtioNetworkDevice::new_with_attachment(&net_attachment);
             net_device.set_mac_address(&MACAddress::random_local());
             config.set_network_devices(&[net_device]);
@@ -271,6 +272,16 @@ impl Sandbox {
         stdout: &mut impl Write,
         stderr: &mut impl Write,
     ) -> Result<i32> {
+        self.exec_with_env(argv, &HashMap::new(), stdout, stderr)
+    }
+
+    pub fn exec_with_env(
+        &self,
+        argv: &[impl AsRef<str>],
+        env: &HashMap<String, String>,
+        stdout: &mut impl Write,
+        stderr: &mut impl Write,
+    ) -> Result<i32> {
         let stream = self.connect_vsock()?;
         let mut writer = stream.try_clone()?;
         let mut reader = stream;
@@ -279,7 +290,7 @@ impl Sandbox {
 
         let req = ExecRequest {
             argv: argv.iter().map(|s| s.as_ref().to_string()).collect(),
-            env: HashMap::new(),
+            env: env.clone(),
             tty: None,
             rows: None,
             cols: None,

@@ -82,6 +82,10 @@ Save the VM's disk state and stop the VM. To continue working, call `Sandbox.sta
 
 Stop the VM without saving. All changes are discarded.
 
+### Secrets and network policy
+
+Secret injection and domain allowlists are configured via `shuru.json` in the working directory. See the [CLI docs](https://github.com/superhq-ai/shuru#config-file) for details.
+
 ## Requirements
 
 - macOS 14+ on Apple Silicon

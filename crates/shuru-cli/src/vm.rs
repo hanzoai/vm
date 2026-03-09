@@ -37,7 +37,7 @@ pub(crate) struct PreparedVm {
     pub cpus: usize,
     pub memory: u64,
     pub disk_size: u64,
-    pub allow_net: bool,
+    pub proxy_config: Option<shuru_proxy::config::ProxyConfig>,
     pub verbose: bool,
     pub forwards: Vec<PortMapping>,
     pub mounts: Vec<MountConfig>,
@@ -53,6 +53,12 @@ pub(crate) fn prepare_vm(
     let disk_size = vm.disk_size.or(cfg.disk_size).unwrap_or(4096);
     let allow_net = vm.allow_net || cfg.allow_net.unwrap_or(false);
     let verbose = vm.verbose;
+
+    let proxy_config = if allow_net {
+        Some(cfg.to_proxy_config())
+    } else {
+        None
+    };
 
     // Merge port forwards: CLI flags + config file
     let mut port_strs: Vec<&str> = vm.port.iter().map(|s| s.as_str()).collect();
@@ -134,8 +140,9 @@ pub(crate) fn prepare_vm(
         }
     };
 
-    // Create per-instance working copy
+    // Create per-instance working copy (clean any stale dir from PID reuse)
     let instance_dir = format!("{}/instances/{}", data_dir, std::process::id());
+    let _ = std::fs::remove_dir_all(&instance_dir);
     std::fs::create_dir_all(&instance_dir)?;
     let work_rootfs = format!("{}/rootfs.ext4", instance_dir);
     if verbose {
@@ -179,22 +186,29 @@ pub(crate) fn prepare_vm(
         cpus,
         memory,
         disk_size,
-        allow_net,
+        proxy_config,
         verbose,
         forwards,
         mounts,
     })
 }
 
-pub(crate) fn build_sandbox(prepared: &PreparedVm, console: bool) -> Result<Sandbox> {
+pub(crate) fn build_sandbox(
+    prepared: &PreparedVm,
+    console: bool,
+    network_fd: Option<i32>,
+) -> Result<Sandbox> {
     let mut builder = Sandbox::builder()
         .kernel(&prepared.kernel_path)
         .rootfs(&prepared.work_rootfs)
         .cpus(prepared.cpus)
         .memory_mb(prepared.memory)
-        .allow_net(prepared.allow_net)
         .console(console)
         .verbose(prepared.verbose);
+
+    if let Some(fd) = network_fd {
+        builder = builder.network_fd(fd);
+    }
 
     if let Some(initrd) = &prepared.initrd_path {
         builder = builder.initrd(initrd);
@@ -217,7 +231,21 @@ pub(crate) fn run_command(prepared: &PreparedVm, command: &[String]) -> Result<i
         prepared.cpus, prepared.memory, prepared.disk_size
     );
 
-    let sandbox = build_sandbox(prepared, false)?;
+    // Set up proxy networking if --allow-net
+    let (vm_fd, proxy_handle) = if let Some(ref proxy_config) = prepared.proxy_config {
+        let (vm_fd, host_fd) = shuru_proxy::create_socketpair()?;
+        let handle = shuru_proxy::start(host_fd, proxy_config.clone())?;
+
+        if prepared.verbose {
+            eprintln!("shuru: proxy started");
+        }
+
+        (Some(vm_fd), Some(handle))
+    } else {
+        (None, None)
+    };
+
+    let sandbox = build_sandbox(prepared, false, vm_fd)?;
     if prepared.verbose {
         eprintln!("shuru: VM created and validated successfully");
     }
@@ -233,12 +261,35 @@ pub(crate) fn run_command(prepared: &PreparedVm, command: &[String]) -> Result<i
         None
     };
 
+    // Inject CA cert and secret placeholders when MITM is needed
+    let mut env = HashMap::new();
+    if let Some(ref handle) = proxy_handle {
+        if !handle.placeholders.is_empty() {
+            sandbox.write_file(
+                "/usr/local/share/ca-certificates/shuru-proxy.crt",
+                &handle.ca_cert_pem,
+            )?;
+            sandbox.exec(
+                &["update-ca-certificates", "--fresh"],
+                &mut std::io::sink(),
+                &mut std::io::sink(),
+            )?;
+            if prepared.verbose {
+                eprintln!("shuru: proxy CA certificate injected");
+            }
+            for (name, placeholder) in &handle.placeholders {
+                env.insert(name.clone(), placeholder.clone());
+            }
+        }
+    }
+
     let exit_code = if std::io::stdin().is_terminal() {
-        sandbox.shell(command, &HashMap::new())?
+        sandbox.shell(command, &env)?
     } else {
-        sandbox.exec(command, &mut std::io::stdout(), &mut std::io::stderr())?
+        sandbox.exec_with_env(command, &env, &mut std::io::stdout(), &mut std::io::stderr())?
     };
 
+    drop(proxy_handle);
     let _ = sandbox.stop();
     Ok(exit_code)
 }

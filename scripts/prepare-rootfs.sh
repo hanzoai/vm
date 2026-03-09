@@ -54,7 +54,8 @@ if [ ! -f "$INITRAMFS_PATH" ]; then
             mkdir -p /initramfs/proc /initramfs/dev /initramfs/newroot
 
             cp /bin/busybox /initramfs/bin/busybox
-            for cmd in sh mount umount switch_root cp chmod echo; do
+            mkdir -p /initramfs/etc
+            for cmd in sh mount umount switch_root cp chmod echo ifconfig route cat; do
                 ln -sf busybox "/initramfs/bin/${cmd}"
             done
 
@@ -73,6 +74,11 @@ mount -t devtmpfs none /dev
 mount -t ext4 /dev/vda /newroot
 cp /bin/shuru-init /newroot/usr/bin/shuru-init
 chmod 755 /newroot/usr/bin/shuru-init
+if ifconfig eth0 up 2>/dev/null; then
+    ifconfig eth0 10.0.0.2 netmask 255.255.255.0 up
+    route add default gw 10.0.0.1
+    echo "nameserver 10.0.0.1" > /newroot/etc/resolv.conf
+fi
 umount /proc
 exec switch_root /newroot /usr/bin/shuru-init
 INITEOF
