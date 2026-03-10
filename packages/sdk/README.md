@@ -42,6 +42,10 @@ const sb = await Sandbox.start({
   allowNet: true,
   ports: ["8080:80"],
   mounts: { "./src": "/workspace" },
+  secrets: {
+    API_KEY: { from: "OPENAI_API_KEY", hosts: ["api.openai.com"] },
+  },
+  network: { allow: ["api.openai.com", "registry.npmjs.org"] },
 });
 ```
 
@@ -54,6 +58,8 @@ const sb = await Sandbox.start({
 | `allowNet` | `boolean` | Enable network access |
 | `ports` | `string[]` | Port forwards (`"host:guest"`) |
 | `mounts` | `Record<string, string>` | Directory mounts (`{ hostPath: guestPath }`) |
+| `secrets` | `Record<string, SecretConfig>` | Secrets to inject via proxy (see below) |
+| `network` | `NetworkConfig` | Network access policy (see below) |
 | `shuruBin` | `string` | Path to shuru binary (default: `"shuru"`) |
 
 ## API
@@ -82,9 +88,33 @@ Save the VM's disk state and stop the VM. To continue working, call `Sandbox.sta
 
 Stop the VM without saving. All changes are discarded.
 
-### Secrets and network policy
+### Secrets
 
-Secret injection and domain allowlists are configured via `shuru.json` in the working directory. See the [CLI docs](https://github.com/superhq-ai/shuru#config-file) for details.
+Secrets keep API keys on the host. The guest receives a random placeholder token; the proxy substitutes the real value only on HTTPS requests to the specified hosts.
+
+```ts
+const sb = await Sandbox.start({
+  allowNet: true,
+  secrets: {
+    API_KEY: { from: "OPENAI_API_KEY", hosts: ["api.openai.com"] },
+  },
+});
+// Inside the VM, $API_KEY is a placeholder token.
+// Requests to api.openai.com get the real key injected by the proxy.
+```
+
+### Network policy
+
+Restrict which domains the guest can reach:
+
+```ts
+const sb = await Sandbox.start({
+  allowNet: true,
+  network: { allow: ["api.openai.com", "*.npmjs.org"] },
+});
+```
+
+Omit `network.allow` to allow all domains.
 
 ## Requirements
 

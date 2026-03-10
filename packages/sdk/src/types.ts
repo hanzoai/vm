@@ -1,3 +1,15 @@
+export interface SecretConfig {
+	/** Host environment variable containing the real value. */
+	from: string;
+	/** Domains where this secret may be sent (e.g. "api.openai.com"). */
+	hosts: string[];
+}
+
+export interface NetworkConfig {
+	/** Allowed domain patterns. Omit to allow all. */
+	allow?: string[];
+}
+
 export interface StartOptions {
 	from?: string;
 	cpus?: number;
@@ -6,6 +18,8 @@ export interface StartOptions {
 	allowNet?: boolean;
 	ports?: string[];
 	mounts?: Record<string, string>;
+	secrets?: Record<string, SecretConfig>;
+	network?: NetworkConfig;
 	shuruBin?: string;
 }
 

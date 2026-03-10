@@ -55,7 +55,24 @@ pub(crate) fn prepare_vm(
     let verbose = vm.verbose;
 
     let proxy_config = if allow_net {
-        Some(cfg.to_proxy_config())
+        let mut proxy = cfg.to_proxy_config();
+
+        // Merge --secret flags: NAME=ENV_VAR@host1,host2
+        for s in &vm.secret {
+            let (name, from, hosts) = parse_secret_flag(s)
+                .with_context(|| format!("invalid --secret: '{}' (expected NAME=ENV@host1,host2)", s))?;
+            proxy.secrets.insert(
+                name,
+                shuru_proxy::config::SecretConfig { from, hosts },
+            );
+        }
+
+        // Merge --allow-domain flags
+        for d in &vm.allow_host {
+            proxy.network.allow.push(d.clone());
+        }
+
+        Some(proxy)
     } else {
         None
     };
@@ -314,6 +331,21 @@ fn parse_mount_spec(s: &str) -> Result<MountConfig> {
         host_path,
         guest_path,
     })
+}
+
+/// Parse `NAME=ENV_VAR@host1,host2` into (name, from, hosts).
+fn parse_secret_flag(s: &str) -> Result<(String, String, Vec<String>)> {
+    let (name, rest) = s
+        .split_once('=')
+        .ok_or_else(|| anyhow::anyhow!("missing '=' separator"))?;
+    let (from, hosts_str) = rest
+        .split_once('@')
+        .ok_or_else(|| anyhow::anyhow!("missing '@' separator for hosts"))?;
+    let hosts: Vec<String> = hosts_str.split(',').map(|h| h.trim().to_string()).collect();
+    if name.is_empty() || from.is_empty() || hosts.is_empty() {
+        bail!("name, env var, and hosts must all be non-empty");
+    }
+    Ok((name.to_string(), from.to_string(), hosts))
 }
 
 fn parse_port_mapping(s: &str) -> Result<PortMapping> {

@@ -38,6 +38,14 @@ pub(crate) struct VmArgs {
     #[arg(long = "mount", value_name = "HOST:GUEST")]
     pub mount: Vec<String>,
 
+    /// Inject a secret via proxy (NAME=ENV_VAR@host1,host2)
+    #[arg(long = "secret", value_name = "NAME=ENV@HOSTS")]
+    pub secret: Vec<String>,
+
+    /// Restrict network to specific hosts (repeatable)
+    #[arg(long = "allow-host", value_name = "PATTERN")]
+    pub allow_host: Vec<String>,
+
     /// Path to config file (default: ./shuru.json)
     #[arg(long)]
     pub config: Option<String>,

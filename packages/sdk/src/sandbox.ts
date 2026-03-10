@@ -76,6 +76,18 @@ export function buildArgs(bin: string, opts: StartOptions): string[] {
 	if (opts.diskSize) args.push("--disk-size", String(opts.diskSize));
 	if (opts.allowNet) args.push("--allow-net");
 
+	if (opts.secrets) {
+		for (const [name, secret] of Object.entries(opts.secrets)) {
+			args.push("--secret", `${name}=${secret.from}@${secret.hosts.join(",")}`);
+		}
+	}
+
+	if (opts.network?.allow) {
+		for (const host of opts.network.allow) {
+			args.push("--allow-host", host);
+		}
+	}
+
 	if (opts.ports) {
 		for (const p of opts.ports) {
 			args.push("-p", p);

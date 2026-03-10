@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.3.3
+
+- Added `--secret` and `--allow-host` CLI flags for inline proxy config (no `shuru.json` required)
+- Replaced `shuru.epoch` cmdline hack with proper PL031 RTC, now, the kernel sets wall clock at boot automatically
+- Added `libatomic1` to rootfs
+- SDK: `secrets` and `network` options now map to CLI flags directly (no temp config files)
+
 ## 0.3.2
 
 - Fixed proxy corrupting large HTTP responses (e.g. `apt-get update`) due to dropped bytes when smoltcp TX buffer was full

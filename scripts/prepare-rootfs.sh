@@ -134,7 +134,7 @@ DPKGEOF
             chroot /mnt/rootfs apt-get update -qq
             chroot /mnt/rootfs apt-get install -y -qq --no-install-recommends \
                 ca-certificates curl git iproute2 \
-                openssh-client jq less procps xz-utils libgomp1 > /dev/null 2>&1
+                openssh-client jq less procps xz-utils libgomp1 libatomic1 > /dev/null 2>&1
 
             rm -rf /mnt/rootfs/usr/share/doc/* /mnt/rootfs/usr/share/man/* /mnt/rootfs/usr/share/info/*
             find /mnt/rootfs/usr/share/locale -mindepth 1 -maxdepth 1 ! -name "en*" -exec rm -rf {} + 2>/dev/null || true
@@ -179,7 +179,7 @@ DPKGEOF
     sudo chroot "$MOUNT_DIR" apt-get update -qq
     sudo chroot "$MOUNT_DIR" apt-get install -y -qq --no-install-recommends \
         ca-certificates curl git iproute2 \
-        openssh-client jq less procps xz-utils libgomp1 > /dev/null 2>&1
+        openssh-client jq less procps xz-utils libgomp1 libatomic1 > /dev/null 2>&1
 
     sudo rm -rf "${MOUNT_DIR}/usr/share/doc/"* "${MOUNT_DIR}/usr/share/man/"* "${MOUNT_DIR}/usr/share/info/"*
     sudo find "${MOUNT_DIR}/usr/share/locale" -mindepth 1 -maxdepth 1 ! -name "en*" -exec rm -rf {} + 2>/dev/null || true

@@ -84,6 +84,53 @@ describe("buildArgs", () => {
 		]);
 	});
 
+	test("secrets", () => {
+		const args = buildArgs("shuru", {
+			allowNet: true,
+			secrets: {
+				API_KEY: { from: "OPENAI_API_KEY", hosts: ["api.openai.com"] },
+			},
+		});
+		expect(args).toEqual([
+			"shuru",
+			"run",
+			"--stdio",
+			"--allow-net",
+			"--secret",
+			"API_KEY=OPENAI_API_KEY@api.openai.com",
+		]);
+	});
+
+	test("secrets with multiple hosts", () => {
+		const args = buildArgs("shuru", {
+			secrets: {
+				TOKEN: { from: "MY_TOKEN", hosts: ["a.com", "b.com"] },
+			},
+		});
+		expect(args).toEqual([
+			"shuru",
+			"run",
+			"--stdio",
+			"--secret",
+			"TOKEN=MY_TOKEN@a.com,b.com",
+		]);
+	});
+
+	test("network allow hosts", () => {
+		const args = buildArgs("shuru", {
+			network: { allow: ["api.openai.com", "*.npmjs.org"] },
+		});
+		expect(args).toEqual([
+			"shuru",
+			"run",
+			"--stdio",
+			"--allow-host",
+			"api.openai.com",
+			"--allow-host",
+			"*.npmjs.org",
+		]);
+	});
+
 	test("all options combined", () => {
 		const args = buildArgs("shuru", {
 			from: "base",

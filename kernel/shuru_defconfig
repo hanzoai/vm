@@ -152,6 +152,14 @@ CONFIG_USER_NS=y
 # inotify (used by many tools)
 CONFIG_INOTIFY_USER=y
 
+# RTC (PL031 — exposed by Virtualization.framework device tree)
+CONFIG_RTC_CLASS=y
+CONFIG_RTC_HCTOSYS=y
+CONFIG_RTC_HCTOSYS_DEVICE="rtc0"
+CONFIG_RTC_INTF_SYSFS=y
+CONFIG_RTC_INTF_DEV=y
+CONFIG_RTC_DRV_PL031=y
+
 # Disable unnecessary subsystems
 # CONFIG_SOUND is not set
 # CONFIG_USB_SUPPORT is not set

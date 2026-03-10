@@ -32,6 +32,9 @@ shuru run -- echo hello
 # With network access
 shuru run --allow-net
 
+# Restrict to specific hosts
+shuru run --allow-net --allow-host api.openai.com --allow-host registry.npmjs.org
+
 # Custom resources
 shuru run --cpus 4 --memory 4096 --disk-size 8192 -- make -j4
 ```
@@ -89,6 +92,25 @@ shuru checkpoint list
 shuru checkpoint delete myenv
 ```
 
+### Secrets
+
+Secrets keep API keys on the host. The guest receives a random placeholder token; the proxy substitutes the real value only on HTTPS requests to the specified hosts. The real secret never enters the VM.
+
+```sh
+# Inject a secret via CLI
+shuru run --allow-net --secret API_KEY=OPENAI_API_KEY@api.openai.com -- curl https://api.openai.com/v1/models
+
+# Multiple secrets
+shuru run --allow-net \
+  --secret API_KEY=OPENAI_API_KEY@api.openai.com \
+  --secret GH_TOKEN=GITHUB_TOKEN@api.github.com \
+  -- sh
+```
+
+Format: `NAME=ENV_VAR@host1,host2` — `NAME` is the env var the guest sees, `ENV_VAR` is the host env var with the real value, and hosts are where the proxy substitutes it.
+
+Secrets can also be set in `shuru.json` (see [Config file](#config-file)).
+
 ### Config file
 
 Shuru loads `shuru.json` from the current directory (or `--config PATH`). All fields are optional; CLI flags take precedence.
@@ -114,9 +136,7 @@ Shuru loads `shuru.json` from the current directory (or `--config PATH`). All fi
 }
 ```
 
-When `secrets` are configured, the guest receives a random placeholder token (e.g. `$API_KEY=shuru_tok_...`). The proxy substitutes the real value only on HTTPS requests to the specified hosts. The real secret never enters the VM.
-
-The `network.allow` list restricts which domains the guest can reach. Omit it to allow all domains.
+The `network.allow` list restricts which hosts the guest can reach. Omit it to allow all hosts.
 
 ## SDK
 
