@@ -1,0 +1,75 @@
+---
+import { Code } from "astro:components";
+
+interface Props {
+  code: string;
+  lang: string;
+  title?: string;
+}
+
+const { code, lang, title } = Astro.props;
+---
+
+<div class="code-block border border-border relative group">
+  <div class="flex items-center gap-2 border-b border-border px-4 py-2.5">
+    <div class="flex gap-1.5">
+      <div class="h-2.5 w-2.5 rounded-full" style="background:#ff5f57"></div>
+      <div class="h-2.5 w-2.5 rounded-full" style="background:#febc2e"></div>
+      <div class="h-2.5 w-2.5 rounded-full" style="background:#28c840"></div>
+    </div>
+    {title && <span class="ml-2 font-mono text-[10px] text-dim">{title}</span>}
+    <button
+      class="copy-btn ml-auto opacity-0 group-hover:opacity-100 transition-opacity text-dim hover:text-muted"
+      data-code={code}
+      aria-label="Copy code"
+    >
+      <svg class="copy-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+        <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+      </svg>
+      <svg class="check-icon hidden" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <polyline points="20 6 9 17 4 12"></polyline>
+      </svg>
+    </button>
+  </div>
+  <Code code={code} lang={lang} theme="vesper" />
+</div>
+
+<style>
+  .code-block {
+    background: var(--color-surface);
+  }
+  .code-block :global(pre) {
+    margin: 0;
+    padding: 1.25rem;
+    background: transparent !important;
+    font-size: 0.75rem;
+    line-height: 1.8;
+  }
+  @media (min-width: 768px) {
+    .code-block :global(pre) {
+      padding: 1.5rem;
+      font-size: 0.875rem;
+    }
+  }
+</style>
+
+<script>
+  document.querySelectorAll('.copy-btn').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const code = btn.getAttribute('data-code') ?? '';
+      await navigator.clipboard.writeText(code);
+
+      const copyIcon = btn.querySelector('.copy-icon') as HTMLElement;
+      const checkIcon = btn.querySelector('.check-icon') as HTMLElement;
+
+      copyIcon.classList.add('hidden');
+      checkIcon.classList.remove('hidden');
+
+      setTimeout(() => {
+        copyIcon.classList.remove('hidden');
+        checkIcon.classList.add('hidden');
+      }, 1500);
+    });
+  });
+</script>

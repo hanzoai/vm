@@ -29,9 +29,16 @@ export interface ExecResult {
 	exitCode: number;
 }
 
+export interface ExecOptions {
+	/** Shell to use when command is a string. Defaults to "sh". Ignored when command is an array. */
+	shell?: string;
+}
+
 export interface SpawnOptions {
 	cwd?: string;
 	env?: Record<string, string>;
+	/** Shell to use when command is a string. Defaults to "sh". Ignored when command is an array. */
+	shell?: string;
 }
 
 export interface WatchOptions {

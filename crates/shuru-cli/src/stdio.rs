@@ -240,8 +240,35 @@ fn send_error_shared(
 pub(crate) fn run_stdio(prepared: &PreparedVm) -> Result<i32> {
     let out: SharedWriter = Arc::new(Mutex::new(io::stdout()));
 
-    let sandbox = Arc::new(vm::build_sandbox(prepared, false, None)?);
+    // Set up proxy networking if --allow-net
+    let (vm_fd, proxy_handle) = if let Some(ref proxy_config) = prepared.proxy_config {
+        let (vm_fd, host_fd) = shuru_proxy::create_socketpair()?;
+        let handle = shuru_proxy::start(host_fd, proxy_config.clone())?;
+        (Some(vm_fd), Some(handle))
+    } else {
+        (None, None)
+    };
+
+    let sandbox = Arc::new(vm::build_sandbox(prepared, false, vm_fd)?);
     sandbox.start()?;
+
+    // Inject CA cert and secret placeholders when MITM is needed
+    let secret_env: HashMap<String, String> = if let Some(ref handle) = proxy_handle {
+        if !handle.placeholders.is_empty() {
+            sandbox.write_file(
+                "/usr/local/share/ca-certificates/shuru-proxy.crt",
+                &handle.ca_cert_pem,
+            )?;
+            sandbox.exec(
+                &["update-ca-certificates", "--fresh"],
+                &mut io::sink(),
+                &mut io::sink(),
+            )?;
+        }
+        handle.placeholders.clone()
+    } else {
+        HashMap::new()
+    };
 
     let _fwd = if !prepared.forwards.is_empty() {
         Some(sandbox.start_port_forwarding(&prepared.forwards)?)
@@ -345,7 +372,7 @@ pub(crate) fn run_stdio(prepared: &PreparedVm) -> Result<i32> {
                         continue;
                     }
                 };
-                handle_exec(&sandbox, req.id, &params.argv, &out)?;
+                handle_exec(&sandbox, req.id, &params.argv, &secret_env, &out)?;
             }
 
             method::SPAWN => {
@@ -367,10 +394,12 @@ pub(crate) fn run_stdio(prepared: &PreparedVm) -> Result<i32> {
                 let sb = sandbox.clone();
                 let tx = event_tx.clone();
                 let pid_clone = pid.clone();
+                let mut spawn_env = secret_env.clone();
+                spawn_env.extend(params.env.into_iter());
 
                 std::thread::spawn(move || {
                     let argv: Vec<&str> = params.argv.iter().map(|s| s.as_str()).collect();
-                    let stream = match sb.open_exec(&argv, &params.env, params.cwd.as_deref()) {
+                    let stream = match sb.open_exec(&argv, &spawn_env, params.cwd.as_deref()) {
                         Ok(s) => s,
                         Err(e) => {
                             eprintln!("shuru: spawn failed: {}", e);
@@ -588,12 +617,13 @@ fn handle_exec(
     sandbox: &Sandbox,
     id: serde_json::Value,
     argv: &[String],
+    env: &HashMap<String, String>,
     out: &SharedWriter,
 ) -> Result<()> {
     let mut stdout_buf = Vec::new();
     let mut stderr_buf = Vec::new();
 
-    let exit_code = match sandbox.exec(argv, &mut stdout_buf, &mut stderr_buf) {
+    let exit_code = match sandbox.exec_with_env(argv, env, &mut stdout_buf, &mut stderr_buf) {
         Ok(code) => code,
         Err(e) => {
             return send_error_shared(out, id, SERVER_ERROR, format!("exec failed: {}", e));

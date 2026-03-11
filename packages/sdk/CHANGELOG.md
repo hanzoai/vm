@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.3.1 (2026-03-12)
+
+### Added
+
+- **`exec(command: string | string[])`** pass an array to execute argv directly with no shell interpretation. String form is unchanged (`sh -c`).
+- **`spawn(command: string | string[])`** same array overload for spawn.
+- **`ExecOptions.shell`** override the default shell for string commands (e.g. `{ shell: "/bin/bash" }`).
+- **`SpawnOptions.shell`** same shell override for spawn.
+
+### Fixed
+
+- Networking via `allowNet` now works correctly (requires CLI 0.4.1).
+
 ## 0.3.0 (2026-03-11)
 
 ### Added

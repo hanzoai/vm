@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.4.1
+
+### CLI (`shuru-cli` 0.4.1)
+
+- Fixed `--allow-net` having no effect in `--stdio` mode. Proxy networking now works via the SDK.
+- Secret environment variables are now injected into exec/spawn calls in stdio mode
+- CA certificate installation for MITM proxying in stdio mode
+
+### SDK (`@superhq/shuru` 0.3.1)
+
+- `exec()` and `spawn()` now accept `string | string[]`. Array form passes argv directly with no shell interpretation.
+- Added `shell` option to `ExecOptions` and `SpawnOptions` to override the default shell (e.g. `/bin/bash` instead of `sh`)
+- New exported type: `ExecOptions`
+
 ## 0.4.0
 
 ### Streaming spawn, kill, and file watching

@@ -1,6 +1,7 @@
 import { ShuruProcess } from "./process";
 import { SandboxProcess } from "./process-handle";
 import type {
+	ExecOptions,
 	ExecResult,
 	FileChangeEvent,
 	SpawnOptions,
@@ -35,10 +36,15 @@ export class Sandbox {
 		return new Sandbox(proc);
 	}
 
-	async exec(command: string): Promise<ExecResult> {
-		const resp = await this.proc.send(Method.EXEC, {
-			argv: ["sh", "-c", command],
-		});
+	async exec(
+		command: string | string[],
+		opts?: ExecOptions,
+	): Promise<ExecResult> {
+		const argv =
+			typeof command === "string"
+				? [opts?.shell ?? "sh", "-c", command]
+				: command;
+		const resp = await this.proc.send(Method.EXEC, { argv });
 		const r = resp.result as {
 			stdout: string;
 			stderr: string;
@@ -51,9 +57,16 @@ export class Sandbox {
 		};
 	}
 
-	async spawn(command: string, opts?: SpawnOptions): Promise<SandboxProcess> {
+	async spawn(
+		command: string | string[],
+		opts?: SpawnOptions,
+	): Promise<SandboxProcess> {
+		const argv =
+			typeof command === "string"
+				? [opts?.shell ?? "sh", "-c", command]
+				: command;
 		const resp = await this.proc.send(Method.SPAWN, {
-			argv: ["sh", "-c", command],
+			argv,
 			cwd: opts?.cwd,
 			env: opts?.env,
 		});
