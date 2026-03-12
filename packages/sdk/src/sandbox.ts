@@ -1,11 +1,16 @@
 import { ShuruProcess } from "./process";
 import { SandboxProcess } from "./process-handle";
 import type {
+	CopyOptions,
+	DirEntry,
 	ExecOptions,
 	ExecResult,
 	FileChangeEvent,
+	MkdirOptions,
+	RemoveOptions,
 	SpawnOptions,
 	StartOptions,
+	StatResult,
 	WatchOptions,
 } from "./types";
 
@@ -16,6 +21,13 @@ const Method = {
 	WRITE_FILE: "write_file",
 	CHECKPOINT: "checkpoint",
 	WATCH: "watch",
+	MKDIR: "mkdir",
+	READ_DIR: "read_dir",
+	STAT: "stat",
+	REMOVE: "remove",
+	RENAME: "rename",
+	COPY: "copy",
+	CHMOD: "chmod",
 } as const;
 
 export class Sandbox {
@@ -95,6 +107,74 @@ export class Sandbox {
 	async writeFile(path: string, content: Uint8Array | string): Promise<void> {
 		const b64 = Buffer.from(content).toString("base64");
 		await this.proc.send(Method.WRITE_FILE, { path, content: b64 });
+	}
+
+	async mkdir(path: string, opts?: MkdirOptions): Promise<void> {
+		await this.proc.send(Method.MKDIR, {
+			path,
+			recursive: opts?.recursive ?? true,
+		});
+	}
+
+	async readDir(path: string): Promise<DirEntry[]> {
+		const resp = await this.proc.send(Method.READ_DIR, { path });
+		const r = resp.result as { entries: DirEntry[] };
+		return r.entries;
+	}
+
+	async stat(path: string): Promise<StatResult> {
+		const resp = await this.proc.send(Method.STAT, { path });
+		const r = resp.result as {
+			size: number;
+			mode: number;
+			mtime: number;
+			is_dir: boolean;
+			is_file: boolean;
+			is_symlink: boolean;
+		};
+		return {
+			size: r.size,
+			mode: r.mode,
+			mtime: r.mtime,
+			isDir: r.is_dir,
+			isFile: r.is_file,
+			isSymlink: r.is_symlink,
+		};
+	}
+
+	async remove(path: string, opts?: RemoveOptions): Promise<void> {
+		await this.proc.send(Method.REMOVE, {
+			path,
+			recursive: opts?.recursive ?? false,
+		});
+	}
+
+	async rename(oldPath: string, newPath: string): Promise<void> {
+		await this.proc.send(Method.RENAME, {
+			old_path: oldPath,
+			new_path: newPath,
+		});
+	}
+
+	async copy(src: string, dst: string, opts?: CopyOptions): Promise<void> {
+		await this.proc.send(Method.COPY, {
+			src,
+			dst,
+			recursive: opts?.recursive ?? false,
+		});
+	}
+
+	async chmod(path: string, mode: number): Promise<void> {
+		await this.proc.send(Method.CHMOD, { path, mode });
+	}
+
+	async exists(path: string): Promise<boolean> {
+		try {
+			await this.stat(path);
+			return true;
+		} catch {
+			return false;
+		}
 	}
 
 	async checkpoint(name: string): Promise<void> {

@@ -34,6 +34,16 @@ await sb.watch("/workspace", (event) => {
 await sb.writeFile("/tmp/app.ts", "console.log('hi')");
 const data = await sb.readFile("/tmp/app.ts"); // Uint8Array
 
+// Filesystem operations
+await sb.mkdir("/workspace/src");
+const entries = await sb.readDir("/workspace"); // { name, type, size }[]
+const info = await sb.stat("/tmp/app.ts");      // { size, mode, mtime, isDir, ... }
+await sb.copy("/tmp/app.ts", "/tmp/backup.ts");
+await sb.rename("/tmp/backup.ts", "/tmp/old.ts");
+await sb.chmod("/tmp/app.ts", 0o755);
+await sb.remove("/tmp/old.ts");
+if (await sb.exists("/tmp/app.ts")) { /* ... */ }
+
 // Checkpoint — save disk state and stop
 await sb.checkpoint("my-env");
 ```
@@ -132,6 +142,50 @@ Read a file from the VM. Returns raw bytes. Use `new TextDecoder().decode(data)`
 ### `sandbox.writeFile(path, content: Uint8Array | string): Promise<void>`
 
 Write a file to the VM. Accepts raw bytes or a string.
+
+### `sandbox.mkdir(path, opts?): Promise<void>`
+
+Create a directory. Creates parent directories by default.
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `recursive` | `boolean` | `true` | Create parent directories |
+
+### `sandbox.readDir(path): Promise<DirEntry[]>`
+
+List the contents of a directory. Each entry has `name`, `type` (`"file"`, `"dir"`, or `"symlink"`), and `size` in bytes.
+
+### `sandbox.stat(path): Promise<StatResult>`
+
+Get file metadata. Returns `{ size, mode, mtime, isDir, isFile, isSymlink }`. `mtime` is seconds since the Unix epoch. `mode` includes the file type bits (e.g. `0o100644` for a regular file with 644 permissions).
+
+### `sandbox.remove(path, opts?): Promise<void>`
+
+Delete a file or empty directory. To remove a non-empty directory, pass `{ recursive: true }`.
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `recursive` | `boolean` | `false` | Remove directories and their contents |
+
+### `sandbox.rename(oldPath, newPath): Promise<void>`
+
+Move or rename a file or directory within the guest filesystem. Atomic on the same filesystem.
+
+### `sandbox.copy(src, dst, opts?): Promise<void>`
+
+Copy a file. To copy a directory tree, pass `{ recursive: true }`.
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `recursive` | `boolean` | `false` | Copy directories recursively |
+
+### `sandbox.chmod(path, mode): Promise<void>`
+
+Change file permissions. `mode` is a numeric permission value (e.g. `0o755`).
+
+### `sandbox.exists(path): Promise<boolean>`
+
+Check if a path exists. Returns `true` if it does, `false` otherwise.
 
 ### `sandbox.checkpoint(name): Promise<void>`
 

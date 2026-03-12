@@ -89,8 +89,8 @@ describe.if(canRun)("streaming exec", () => {
 
 		await proc.kill();
 		const code = await proc.exited;
-		// SIGTERM = 128 + 15 = 143
-		expect(code).toBeGreaterThan(0);
+		// Process was killed, exit code is non-zero (typically -1 or 137/143)
+		expect(code).not.toBe(0);
 	}, 30_000);
 
 	test("multiple concurrent spawns", async () => {

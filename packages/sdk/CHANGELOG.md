@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.4.0 (2026-03-13)
+
+### Added
+
+- `sandbox.mkdir(path, opts?)` creates directories. Recursive by default (creates parents).
+- `sandbox.readDir(path)` lists directory contents. Returns `{ name, type, size }[]` where type is `"file"`, `"dir"`, or `"symlink"`.
+- `sandbox.stat(path)` returns file metadata: `{ size, mode, mtime, isDir, isFile, isSymlink }`.
+- `sandbox.remove(path, opts?)` deletes files and directories. Pass `{ recursive: true }` to remove non-empty directories.
+- `sandbox.rename(oldPath, newPath)` moves or renames files and directories within the guest.
+- `sandbox.copy(src, dst, opts?)` copies a file. Pass `{ recursive: true }` to copy directories.
+- `sandbox.chmod(path, mode)` changes file permissions (e.g. `0o755`).
+- `sandbox.exists(path)` returns `true` if the path exists, `false` otherwise.
+- Exported types: `DirEntry`, `StatResult`, `MkdirOptions`, `RemoveOptions`, `CopyOptions`.
+- Unit tests for all new filesystem operations.
+- Integration tests for all new filesystem operations against a real VM.
+
+These are native protocol operations over vsock, not wrappers over shell commands.
+
 ## 0.3.1 (2026-03-12)
 
 ### Added

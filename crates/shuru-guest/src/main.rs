@@ -2,12 +2,15 @@
 mod guest {
     use std::io::{Read, Write};
     use std::os::unix::io::FromRawFd;
+    use std::os::unix::process::CommandExt;
     use std::process::{Command, Stdio};
 
     use shuru_proto::frame;
     use shuru_proto::{
-        ExecRequest, ForwardRequest, ForwardResponse, MountRequest, MountResponse,
-        ReadFileRequest, WatchEvent, WatchRequest, WriteFileRequest, WriteFileResponse,
+        ChmodRequest, CopyRequest, DirEntry, ExecRequest, ForwardRequest, ForwardResponse,
+        FsOkResponse, MkdirRequest, MountRequest, MountResponse, ReadDirRequest, ReadDirResponse,
+        ReadFileRequest, RemoveRequest, RenameRequest, StatRequest, StatResponse, WatchEvent,
+        WatchRequest, WriteFileRequest, WriteFileResponse,
     };
     use shuru_proto::{VSOCK_PORT, VSOCK_PORT_FORWARD};
 
@@ -372,6 +375,83 @@ mod guest {
                     };
                     handle_write_file(&req, &mut reader, &mut writer);
                 }
+                frame::MKDIR_REQ => {
+                    let req: MkdirRequest = match serde_json::from_slice(&payload) {
+                        Ok(r) => r,
+                        Err(e) => {
+                            let msg = format!("invalid mkdir request: {}", e);
+                            let _ = frame::write_frame(&mut writer, frame::ERROR, msg.as_bytes());
+                            continue;
+                        }
+                    };
+                    handle_mkdir(&req, &mut writer);
+                }
+                frame::READ_DIR_REQ => {
+                    let req: ReadDirRequest = match serde_json::from_slice(&payload) {
+                        Ok(r) => r,
+                        Err(e) => {
+                            let msg = format!("invalid read_dir request: {}", e);
+                            let _ = frame::write_frame(&mut writer, frame::ERROR, msg.as_bytes());
+                            continue;
+                        }
+                    };
+                    handle_read_dir(&req, &mut writer);
+                }
+                frame::STAT_REQ => {
+                    let req: StatRequest = match serde_json::from_slice(&payload) {
+                        Ok(r) => r,
+                        Err(e) => {
+                            let msg = format!("invalid stat request: {}", e);
+                            let _ = frame::write_frame(&mut writer, frame::ERROR, msg.as_bytes());
+                            continue;
+                        }
+                    };
+                    handle_stat(&req, &mut writer);
+                }
+                frame::REMOVE_REQ => {
+                    let req: RemoveRequest = match serde_json::from_slice(&payload) {
+                        Ok(r) => r,
+                        Err(e) => {
+                            let msg = format!("invalid remove request: {}", e);
+                            let _ = frame::write_frame(&mut writer, frame::ERROR, msg.as_bytes());
+                            continue;
+                        }
+                    };
+                    handle_remove(&req, &mut writer);
+                }
+                frame::RENAME_REQ => {
+                    let req: RenameRequest = match serde_json::from_slice(&payload) {
+                        Ok(r) => r,
+                        Err(e) => {
+                            let msg = format!("invalid rename request: {}", e);
+                            let _ = frame::write_frame(&mut writer, frame::ERROR, msg.as_bytes());
+                            continue;
+                        }
+                    };
+                    handle_rename(&req, &mut writer);
+                }
+                frame::COPY_REQ => {
+                    let req: CopyRequest = match serde_json::from_slice(&payload) {
+                        Ok(r) => r,
+                        Err(e) => {
+                            let msg = format!("invalid copy request: {}", e);
+                            let _ = frame::write_frame(&mut writer, frame::ERROR, msg.as_bytes());
+                            continue;
+                        }
+                    };
+                    handle_copy(&req, &mut writer);
+                }
+                frame::CHMOD_REQ => {
+                    let req: ChmodRequest = match serde_json::from_slice(&payload) {
+                        Ok(r) => r,
+                        Err(e) => {
+                            let msg = format!("invalid chmod request: {}", e);
+                            let _ = frame::write_frame(&mut writer, frame::ERROR, msg.as_bytes());
+                            continue;
+                        }
+                    };
+                    handle_chmod(&req, &mut writer);
+                }
                 _ => {} // unknown type, skip
             }
         }
@@ -439,6 +519,163 @@ mod guest {
         }
     }
 
+    fn send_fs_ok(writer: &mut impl Write) {
+        let resp = FsOkResponse { ok: true, error: None };
+        let _ = frame::send_json(writer, frame::FS_OK_RESP, &resp);
+    }
+
+    fn send_fs_err(writer: &mut impl Write, msg: String) {
+        let _ = frame::write_frame(writer, frame::ERROR, msg.as_bytes());
+    }
+
+    fn handle_mkdir(req: &MkdirRequest, writer: &mut impl Write) {
+        let result = if req.recursive {
+            std::fs::create_dir_all(&req.path)
+        } else {
+            std::fs::create_dir(&req.path)
+        };
+        match result {
+            Ok(()) => send_fs_ok(writer),
+            Err(e) => send_fs_err(writer, format!("mkdir {}: {}", req.path, e)),
+        }
+    }
+
+    fn handle_read_dir(req: &ReadDirRequest, writer: &mut impl Write) {
+        match std::fs::read_dir(&req.path) {
+            Ok(iter) => {
+                let mut entries = Vec::new();
+                for entry in iter.flatten() {
+                    let name = entry.file_name().to_string_lossy().into_owned();
+                    let meta = entry.metadata();
+                    let (entry_type, size) = match &meta {
+                        Ok(m) if m.file_type().is_symlink() => ("symlink", m.len()),
+                        Ok(m) if m.is_dir() => ("dir", m.len()),
+                        Ok(m) => ("file", m.len()),
+                        Err(_) => ("file", 0),
+                    };
+                    entries.push(DirEntry {
+                        name,
+                        entry_type: entry_type.to_string(),
+                        size,
+                    });
+                }
+                let resp = ReadDirResponse { entries };
+                let _ = frame::send_json(writer, frame::READ_DIR_RESP, &resp);
+            }
+            Err(e) => send_fs_err(writer, format!("read_dir {}: {}", req.path, e)),
+        }
+    }
+
+    fn handle_stat(req: &StatRequest, writer: &mut impl Write) {
+        use std::os::unix::fs::MetadataExt;
+        match std::fs::symlink_metadata(&req.path) {
+            Ok(m) => {
+                let mtime = m
+                    .modified()
+                    .ok()
+                    .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                    .map(|d| d.as_secs())
+                    .unwrap_or(0);
+                let resp = StatResponse {
+                    size: m.len(),
+                    mode: m.mode(),
+                    mtime,
+                    is_dir: m.is_dir(),
+                    is_file: m.is_file(),
+                    is_symlink: m.file_type().is_symlink(),
+                };
+                let _ = frame::send_json(writer, frame::STAT_RESP, &resp);
+            }
+            Err(e) => send_fs_err(writer, format!("stat {}: {}", req.path, e)),
+        }
+    }
+
+    fn handle_remove(req: &RemoveRequest, writer: &mut impl Write) {
+        let result = if req.recursive {
+            std::fs::remove_dir_all(&req.path)
+        } else {
+            std::fs::remove_file(&req.path).or_else(|_| std::fs::remove_dir(&req.path))
+        };
+        match result {
+            Ok(()) => send_fs_ok(writer),
+            Err(e) => send_fs_err(writer, format!("remove {}: {}", req.path, e)),
+        }
+    }
+
+    fn handle_rename(req: &RenameRequest, writer: &mut impl Write) {
+        match std::fs::rename(&req.old_path, &req.new_path) {
+            Ok(()) => send_fs_ok(writer),
+            Err(e) => send_fs_err(writer, format!("rename {} -> {}: {}", req.old_path, req.new_path, e)),
+        }
+    }
+
+    fn handle_copy(req: &CopyRequest, writer: &mut impl Write) {
+        let result = if req.recursive {
+            copy_dir_recursive(std::path::Path::new(&req.src), std::path::Path::new(&req.dst))
+        } else {
+            std::fs::copy(&req.src, &req.dst).map(|_| ())
+        };
+        match result {
+            Ok(()) => send_fs_ok(writer),
+            Err(e) => send_fs_err(writer, format!("copy {} -> {}: {}", req.src, req.dst, e)),
+        }
+    }
+
+    /// Iterative directory copy. Preserves permissions, detects self-copy
+    /// via dev+ino to prevent infinite loops.
+    /// Inspired by https://github.com/mdunsmuir/copy_dir (MIT).
+    fn copy_dir_recursive(src: &std::path::Path, dst: &std::path::Path) -> std::io::Result<()> {
+        use std::os::unix::fs::MetadataExt;
+
+        // Detect copying a directory into itself (would loop forever).
+        let dst_id = if dst.exists() {
+            let m = std::fs::metadata(dst)?;
+            Some((m.dev(), m.ino()))
+        } else {
+            std::fs::create_dir_all(dst)?;
+            let m = std::fs::metadata(dst)?;
+            Some((m.dev(), m.ino()))
+        };
+
+        let mut stack = vec![(src.to_path_buf(), dst.to_path_buf())];
+        while let Some((s, d)) = stack.pop() {
+            let src_meta = std::fs::metadata(&s)?;
+            std::fs::create_dir_all(&d)?;
+
+            for entry in std::fs::read_dir(&s)? {
+                let entry = entry?;
+                let src_child = entry.path();
+                let dst_child = d.join(entry.file_name());
+                let ft = entry.file_type()?;
+
+                if ft.is_dir() {
+                    // Skip if this dir IS the destination (self-copy guard).
+                    let child_meta = std::fs::metadata(&src_child)?;
+                    let child_id = (child_meta.dev(), child_meta.ino());
+                    if dst_id == Some(child_id) {
+                        continue;
+                    }
+                    stack.push((src_child, dst_child));
+                } else {
+                    std::fs::copy(&src_child, &dst_child)?;
+                }
+            }
+
+            // Preserve source directory permissions.
+            std::fs::set_permissions(&d, src_meta.permissions())?;
+        }
+        Ok(())
+    }
+
+    fn handle_chmod(req: &ChmodRequest, writer: &mut impl Write) {
+        use std::os::unix::fs::PermissionsExt;
+        let perms = std::fs::Permissions::from_mode(req.mode);
+        match std::fs::set_permissions(&req.path, perms) {
+            Ok(()) => send_fs_ok(writer),
+            Err(e) => send_fs_err(writer, format!("chmod {}: {}", req.path, e)),
+        }
+    }
+
     fn handle_piped_exec(req: &ExecRequest, vsock_reader: std::net::TcpStream, vsock_writer: std::net::TcpStream) {
         let mut cmd = Command::new(&req.argv[0]);
         if req.argv.len() > 1 {
@@ -453,6 +690,15 @@ mod guest {
         cmd.stdin(Stdio::piped());
         cmd.stdout(Stdio::piped());
         cmd.stderr(Stdio::piped());
+
+        // Put the child in its own process group so we can kill the
+        // entire group (sh + any children) with a single signal.
+        unsafe {
+            cmd.pre_exec(|| {
+                libc::setpgid(0, 0);
+                Ok(())
+            });
+        }
 
         match cmd.spawn() {
             Ok(mut child) => {
@@ -521,7 +767,8 @@ mod guest {
                                 let _ = stdin.flush();
                             }
                             Ok(Some((frame::KILL, _))) => {
-                                unsafe { libc::kill(child_pid, libc::SIGTERM) };
+                                // Kill entire process group (negative pid)
+                                unsafe { libc::kill(-child_pid, libc::SIGTERM) };
                                 break;
                             }
                             _ => break,

@@ -14,9 +14,10 @@ use shuru_darwin::network::FileHandleNetworkAttachment;
 use shuru_darwin::*;
 
 use shuru_proto::{
-    frame, ExecRequest, ForwardRequest, ForwardResponse, MountRequest, MountResponse, PortMapping,
-    ReadFileRequest, WatchRequest, WriteFileRequest, WriteFileResponse,
-    VSOCK_PORT, VSOCK_PORT_FORWARD,
+    frame, ChmodRequest, CopyRequest, ExecRequest, ForwardRequest, ForwardResponse, FsOkResponse,
+    MkdirRequest, MountRequest, MountResponse, PortMapping, ReadDirRequest, ReadDirResponse,
+    ReadFileRequest, RemoveRequest, RenameRequest, StatRequest, StatResponse, WatchRequest,
+    WriteFileRequest, WriteFileResponse, VSOCK_PORT, VSOCK_PORT_FORWARD,
 };
 
 // --- Mount types ---
@@ -377,6 +378,118 @@ impl Sandbox {
         }
 
         Ok(())
+    }
+
+    /// Send a request and expect FS_OK_RESP or ERROR. Used by void fs ops.
+    fn void_fs_op(&self, req_frame: u8, req: &impl serde::Serialize) -> Result<()> {
+        let stream = self.connect_vsock()?;
+        let mut writer = stream.try_clone()?;
+        let mut reader = stream;
+
+        self.send_mount_requests(&mut writer, &mut reader)?;
+
+        frame::send_json(&mut writer, req_frame, req)?;
+
+        match frame::read_frame(&mut reader).context("reading fs op response")? {
+            Some((frame::FS_OK_RESP, payload)) => {
+                let resp: FsOkResponse =
+                    serde_json::from_slice(&payload).context("parsing fs ok response")?;
+                if !resp.ok {
+                    bail!("{}", resp.error.unwrap_or_else(|| "unknown error".into()));
+                }
+                Ok(())
+            }
+            Some((frame::ERROR, payload)) => {
+                bail!("{}", String::from_utf8_lossy(&payload));
+            }
+            Some((other, _)) => {
+                bail!("unexpected frame type 0x{:02x}", other);
+            }
+            None => bail!("guest closed connection"),
+        }
+    }
+
+    pub fn mkdir(&self, path: &str, recursive: bool) -> Result<()> {
+        self.void_fs_op(
+            frame::MKDIR_REQ,
+            &MkdirRequest { path: path.to_string(), recursive },
+        )
+    }
+
+    pub fn read_dir(&self, path: &str) -> Result<ReadDirResponse> {
+        let stream = self.connect_vsock()?;
+        let mut writer = stream.try_clone()?;
+        let mut reader = stream;
+
+        self.send_mount_requests(&mut writer, &mut reader)?;
+
+        let req = ReadDirRequest { path: path.to_string() };
+        frame::send_json(&mut writer, frame::READ_DIR_REQ, &req)?;
+
+        match frame::read_frame(&mut reader).context("reading read_dir response")? {
+            Some((frame::READ_DIR_RESP, payload)) => {
+                Ok(serde_json::from_slice(&payload).context("parsing read_dir response")?)
+            }
+            Some((frame::ERROR, payload)) => {
+                bail!("{}", String::from_utf8_lossy(&payload));
+            }
+            Some((other, _)) => {
+                bail!("unexpected frame type 0x{:02x} in read_dir response", other);
+            }
+            None => bail!("guest closed connection during read_dir"),
+        }
+    }
+
+    pub fn stat(&self, path: &str) -> Result<StatResponse> {
+        let stream = self.connect_vsock()?;
+        let mut writer = stream.try_clone()?;
+        let mut reader = stream;
+
+        self.send_mount_requests(&mut writer, &mut reader)?;
+
+        let req = StatRequest { path: path.to_string() };
+        frame::send_json(&mut writer, frame::STAT_REQ, &req)?;
+
+        match frame::read_frame(&mut reader).context("reading stat response")? {
+            Some((frame::STAT_RESP, payload)) => {
+                Ok(serde_json::from_slice(&payload).context("parsing stat response")?)
+            }
+            Some((frame::ERROR, payload)) => {
+                bail!("{}", String::from_utf8_lossy(&payload));
+            }
+            Some((other, _)) => {
+                bail!("unexpected frame type 0x{:02x} in stat response", other);
+            }
+            None => bail!("guest closed connection during stat"),
+        }
+    }
+
+    pub fn remove(&self, path: &str, recursive: bool) -> Result<()> {
+        self.void_fs_op(
+            frame::REMOVE_REQ,
+            &RemoveRequest { path: path.to_string(), recursive },
+        )
+    }
+
+    pub fn rename(&self, old_path: &str, new_path: &str) -> Result<()> {
+        self.void_fs_op(
+            frame::RENAME_REQ,
+            &RenameRequest { old_path: old_path.to_string(), new_path: new_path.to_string() },
+        )
+    }
+
+    pub fn copy(&self, src: &str, dst: &str, recursive: bool) -> Result<()> {
+        self.void_fs_op(
+            frame::COPY_REQ,
+            &CopyRequest { src: src.to_string(), dst: dst.to_string(), recursive },
+        )
+    }
+
+    pub fn chmod(&self, path: &str, mode: u32) -> Result<()> {
+        self.void_fs_op(
+            frame::CHMOD_REQ,
+            &ChmodRequest { path: path.to_string(), mode },
+        )
     }
 
     /// Open a vsock connection for streaming exec. Returns the raw stream

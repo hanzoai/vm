@@ -33,6 +33,18 @@ pub const FWD_RESP: u8 = 0x21;
 pub const WATCH_REQ: u8 = 0x30;
 pub const WATCH_EVENT: u8 = 0x31;
 
+// Filesystem operations
+pub const MKDIR_REQ: u8 = 0x40;
+pub const FS_OK_RESP: u8 = 0x41;
+pub const READ_DIR_REQ: u8 = 0x42;
+pub const READ_DIR_RESP: u8 = 0x43;
+pub const STAT_REQ: u8 = 0x44;
+pub const STAT_RESP: u8 = 0x45;
+pub const REMOVE_REQ: u8 = 0x46;
+pub const RENAME_REQ: u8 = 0x48;
+pub const COPY_REQ: u8 = 0x4A;
+pub const CHMOD_REQ: u8 = 0x4C;
+
 const MAX_FRAME: u32 = 1 << 20; // 1 MB
 
 /// Write a binary frame: `[u32 BE length][u8 type][payload]`.

@@ -228,6 +228,89 @@ async function handleMessage(msg: {
 			break;
 		}
 
+		case "mkdir": {
+			const path = msg.params?.path as string;
+			if (path === "/fail") {
+				writeLine({
+					jsonrpc: "2.0",
+					id: msg.id,
+					error: { code: -32000, message: "mkdir /fail: Permission denied" },
+				});
+			} else {
+				writeLine({ jsonrpc: "2.0", id: msg.id, result: {} });
+			}
+			break;
+		}
+
+		case "read_dir": {
+			const dirPath = msg.params?.path as string;
+			if (dirPath === "/nonexistent") {
+				writeLine({
+					jsonrpc: "2.0",
+					id: msg.id,
+					error: { code: -32000, message: "read_dir /nonexistent: No such file or directory" },
+				});
+			} else {
+				writeLine({
+					jsonrpc: "2.0",
+					id: msg.id,
+					result: {
+						entries: [
+							{ name: "file.txt", type: "file", size: 42 },
+							{ name: "subdir", type: "dir", size: 4096 },
+							{ name: "link", type: "symlink", size: 10 },
+						],
+					},
+				});
+			}
+			break;
+		}
+
+		case "stat": {
+			const statPath = msg.params?.path as string;
+			if (statPath === "/nonexistent") {
+				writeLine({
+					jsonrpc: "2.0",
+					id: msg.id,
+					error: { code: -32000, message: "stat /nonexistent: No such file or directory" },
+				});
+			} else {
+				writeLine({
+					jsonrpc: "2.0",
+					id: msg.id,
+					result: {
+						size: 1024,
+						mode: 0o100644,
+						mtime: 1700000000,
+						is_dir: false,
+						is_file: true,
+						is_symlink: false,
+					},
+				});
+			}
+			break;
+		}
+
+		case "remove": {
+			writeLine({ jsonrpc: "2.0", id: msg.id, result: {} });
+			break;
+		}
+
+		case "rename": {
+			writeLine({ jsonrpc: "2.0", id: msg.id, result: {} });
+			break;
+		}
+
+		case "copy": {
+			writeLine({ jsonrpc: "2.0", id: msg.id, result: {} });
+			break;
+		}
+
+		case "chmod": {
+			writeLine({ jsonrpc: "2.0", id: msg.id, result: {} });
+			break;
+		}
+
 		case "checkpoint": {
 			writeLine({ jsonrpc: "2.0", id: msg.id, result: {} });
 			process.exit(0);

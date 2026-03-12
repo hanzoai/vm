@@ -22,6 +22,13 @@ mod method {
     pub const READ_FILE: &str = "read_file";
     pub const WRITE_FILE: &str = "write_file";
     pub const CHECKPOINT: &str = "checkpoint";
+    pub const MKDIR: &str = "mkdir";
+    pub const READ_DIR: &str = "read_dir";
+    pub const STAT: &str = "stat";
+    pub const REMOVE: &str = "remove";
+    pub const RENAME: &str = "rename";
+    pub const COPY: &str = "copy";
+    pub const CHMOD: &str = "chmod";
 }
 
 // JSON-RPC 2.0 error codes
@@ -163,6 +170,73 @@ struct WriteFileParams {
 #[derive(Deserialize)]
 struct CheckpointParams {
     name: String,
+}
+
+#[derive(Deserialize)]
+struct MkdirParams {
+    path: String,
+    #[serde(default = "default_true")]
+    recursive: bool,
+}
+
+#[derive(Deserialize)]
+struct ReadDirParams {
+    path: String,
+}
+
+#[derive(Deserialize)]
+struct StatParams {
+    path: String,
+}
+
+#[derive(Deserialize)]
+struct RemoveParams {
+    path: String,
+    #[serde(default)]
+    recursive: bool,
+}
+
+#[derive(Deserialize)]
+struct RenameParams {
+    old_path: String,
+    new_path: String,
+}
+
+#[derive(Deserialize)]
+struct CopyParams {
+    src: String,
+    dst: String,
+    #[serde(default)]
+    recursive: bool,
+}
+
+#[derive(Deserialize)]
+struct ChmodParams {
+    path: String,
+    mode: u32,
+}
+
+#[derive(Serialize)]
+struct DirEntryPayload {
+    name: String,
+    #[serde(rename = "type")]
+    entry_type: String,
+    size: u64,
+}
+
+#[derive(Serialize)]
+struct ReadDirResultPayload {
+    entries: Vec<DirEntryPayload>,
+}
+
+#[derive(Serialize)]
+struct StatResultPayload {
+    size: u64,
+    mode: u32,
+    mtime: u64,
+    is_dir: bool,
+    is_file: bool,
+    is_symlink: bool,
 }
 
 // --- Events from background threads ---
@@ -417,8 +491,11 @@ pub(crate) fn run_stdio(prepared: &PreparedVm) -> Result<i32> {
                     };
                     let mut vsock_writer = stream;
 
-                    // Thread: forward stdin/kill from SDK to vsock
-                    let input_thread = std::thread::spawn(move || {
+                    // Thread: forward stdin/kill from SDK to vsock.
+                    // Returns vsock_writer so it isn't dropped before the read
+                    // loop finishes — on Apple vsock, dropping the original fd
+                    // closes the entire connection even if a dup'd reader exists.
+                    let input_thread = std::thread::spawn(move || -> std::net::TcpStream {
                         for msg in input_rx {
                             match msg {
                                 ProcessInput::Stdin(data) => {
@@ -435,6 +512,7 @@ pub(crate) fn run_stdio(prepared: &PreparedVm) -> Result<i32> {
                                 }
                             }
                         }
+                        vsock_writer
                     });
 
                     // Read vsock frames -> send events
@@ -594,6 +672,128 @@ pub(crate) fn run_stdio(prepared: &PreparedVm) -> Result<i32> {
                 drop(event_tx);
                 let _ = event_thread.join();
                 return Ok(0);
+            }
+
+            method::MKDIR => {
+                let params: MkdirParams = match serde_json::from_value(req.params) {
+                    Ok(p) => p,
+                    Err(e) => {
+                        send_error_shared(&out, req.id, INVALID_PARAMS, format!("invalid params: {}", e))?;
+                        continue;
+                    }
+                };
+                match sandbox.mkdir(&params.path, params.recursive) {
+                    Ok(()) => send_result_shared(&out, req.id, EmptyResult {})?,
+                    Err(e) => send_error_shared(&out, req.id, SERVER_ERROR, format!("{}", e))?,
+                }
+            }
+
+            method::READ_DIR => {
+                let params: ReadDirParams = match serde_json::from_value(req.params) {
+                    Ok(p) => p,
+                    Err(e) => {
+                        send_error_shared(&out, req.id, INVALID_PARAMS, format!("invalid params: {}", e))?;
+                        continue;
+                    }
+                };
+                match sandbox.read_dir(&params.path) {
+                    Ok(resp) => {
+                        let entries: Vec<DirEntryPayload> = resp
+                            .entries
+                            .into_iter()
+                            .map(|e| DirEntryPayload {
+                                name: e.name,
+                                entry_type: e.entry_type,
+                                size: e.size,
+                            })
+                            .collect();
+                        send_result_shared(&out, req.id, ReadDirResultPayload { entries })?;
+                    }
+                    Err(e) => send_error_shared(&out, req.id, SERVER_ERROR, format!("{}", e))?,
+                }
+            }
+
+            method::STAT => {
+                let params: StatParams = match serde_json::from_value(req.params) {
+                    Ok(p) => p,
+                    Err(e) => {
+                        send_error_shared(&out, req.id, INVALID_PARAMS, format!("invalid params: {}", e))?;
+                        continue;
+                    }
+                };
+                match sandbox.stat(&params.path) {
+                    Ok(resp) => {
+                        send_result_shared(
+                            &out,
+                            req.id,
+                            StatResultPayload {
+                                size: resp.size,
+                                mode: resp.mode,
+                                mtime: resp.mtime,
+                                is_dir: resp.is_dir,
+                                is_file: resp.is_file,
+                                is_symlink: resp.is_symlink,
+                            },
+                        )?;
+                    }
+                    Err(e) => send_error_shared(&out, req.id, SERVER_ERROR, format!("{}", e))?,
+                }
+            }
+
+            method::REMOVE => {
+                let params: RemoveParams = match serde_json::from_value(req.params) {
+                    Ok(p) => p,
+                    Err(e) => {
+                        send_error_shared(&out, req.id, INVALID_PARAMS, format!("invalid params: {}", e))?;
+                        continue;
+                    }
+                };
+                match sandbox.remove(&params.path, params.recursive) {
+                    Ok(()) => send_result_shared(&out, req.id, EmptyResult {})?,
+                    Err(e) => send_error_shared(&out, req.id, SERVER_ERROR, format!("{}", e))?,
+                }
+            }
+
+            method::RENAME => {
+                let params: RenameParams = match serde_json::from_value(req.params) {
+                    Ok(p) => p,
+                    Err(e) => {
+                        send_error_shared(&out, req.id, INVALID_PARAMS, format!("invalid params: {}", e))?;
+                        continue;
+                    }
+                };
+                match sandbox.rename(&params.old_path, &params.new_path) {
+                    Ok(()) => send_result_shared(&out, req.id, EmptyResult {})?,
+                    Err(e) => send_error_shared(&out, req.id, SERVER_ERROR, format!("{}", e))?,
+                }
+            }
+
+            method::COPY => {
+                let params: CopyParams = match serde_json::from_value(req.params) {
+                    Ok(p) => p,
+                    Err(e) => {
+                        send_error_shared(&out, req.id, INVALID_PARAMS, format!("invalid params: {}", e))?;
+                        continue;
+                    }
+                };
+                match sandbox.copy(&params.src, &params.dst, params.recursive) {
+                    Ok(()) => send_result_shared(&out, req.id, EmptyResult {})?,
+                    Err(e) => send_error_shared(&out, req.id, SERVER_ERROR, format!("{}", e))?,
+                }
+            }
+
+            method::CHMOD => {
+                let params: ChmodParams = match serde_json::from_value(req.params) {
+                    Ok(p) => p,
+                    Err(e) => {
+                        send_error_shared(&out, req.id, INVALID_PARAMS, format!("invalid params: {}", e))?;
+                        continue;
+                    }
+                };
+                match sandbox.chmod(&params.path, params.mode) {
+                    Ok(()) => send_result_shared(&out, req.id, EmptyResult {})?,
+                    Err(e) => send_error_shared(&out, req.id, SERVER_ERROR, format!("{}", e))?,
+                }
             }
 
             _ => {

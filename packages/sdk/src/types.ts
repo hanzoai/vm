@@ -50,6 +50,36 @@ export interface FileChangeEvent {
 	event: "create" | "modify" | "delete" | "rename";
 }
 
+// --- Filesystem types ---
+
+export interface DirEntry {
+	name: string;
+	type: "file" | "dir" | "symlink";
+	size: number;
+}
+
+export interface StatResult {
+	size: number;
+	mode: number;
+	/** Seconds since Unix epoch */
+	mtime: number;
+	isDir: boolean;
+	isFile: boolean;
+	isSymlink: boolean;
+}
+
+export interface MkdirOptions {
+	recursive?: boolean;
+}
+
+export interface RemoveOptions {
+	recursive?: boolean;
+}
+
+export interface CopyOptions {
+	recursive?: boolean;
+}
+
 // --- JSON-RPC 2.0 wire types (internal) ---
 
 export interface JsonRpcResult {

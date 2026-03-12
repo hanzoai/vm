@@ -86,6 +86,82 @@ pub struct WriteFileResponse {
     pub error: Option<String>,
 }
 
+// --- Filesystem operations protocol ---
+
+#[derive(Serialize, Deserialize)]
+pub struct FsOkResponse {
+    pub ok: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct MkdirRequest {
+    pub path: String,
+    #[serde(default = "default_true")]
+    pub recursive: bool,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct ReadDirRequest {
+    pub path: String,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct DirEntry {
+    pub name: String,
+    #[serde(rename = "type")]
+    pub entry_type: String,
+    pub size: u64,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct ReadDirResponse {
+    pub entries: Vec<DirEntry>,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct StatRequest {
+    pub path: String,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct StatResponse {
+    pub size: u64,
+    pub mode: u32,
+    pub mtime: u64,
+    pub is_dir: bool,
+    pub is_file: bool,
+    pub is_symlink: bool,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct RemoveRequest {
+    pub path: String,
+    #[serde(default)]
+    pub recursive: bool,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct RenameRequest {
+    pub old_path: String,
+    pub new_path: String,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct CopyRequest {
+    pub src: String,
+    pub dst: String,
+    #[serde(default)]
+    pub recursive: bool,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct ChmodRequest {
+    pub path: String,
+    pub mode: u32,
+}
+
 // --- File watching protocol ---
 
 #[derive(Serialize, Deserialize)]
