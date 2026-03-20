@@ -49,6 +49,8 @@ install: build-guest
     codesign --entitlements shuru.entitlements --force -s - target/release/shuru
     mkdir -p ~/.local/bin
     cp target/release/shuru ~/.local/bin/shuru
+    mkdir -p ~/.local/share/shuru
+    cargo pkgid -p shuru-cli | sed 's/.*#//' > ~/.local/share/shuru/VERSION
 
 # Tag and push a release (triggers GitHub Actions)
 release version:

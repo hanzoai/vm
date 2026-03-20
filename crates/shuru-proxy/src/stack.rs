@@ -168,12 +168,22 @@ impl NetworkStack {
         while let Ok(cmd) = self.cmd_rx.try_recv() {
             match cmd {
                 StackCommand::Send { id, payload } => {
+                    // Ignore sends for connections already removed by poll_tcp_sockets
+                    if !self.connections.contains_key(&id.0) {
+                        continue;
+                    }
                     self.pending_send
                         .entry(id.0)
                         .or_default()
                         .extend(&payload);
                 }
                 StackCommand::Close { id } => {
+                    // Connection may have already been cleaned up by poll_tcp_sockets
+                    if !self.connections.contains_key(&id.0) {
+                        self.pending_send.remove(&id.0);
+                        self.closing.remove(&id.0);
+                        continue;
+                    }
                     // Defer close until pending_send is drained so we don't
                     // drop data that hasn't been pushed to smoltcp yet.
                     if self.pending_send.get(&id.0).map_or(true, |p| p.is_empty()) {
@@ -261,6 +271,11 @@ impl NetworkStack {
     fn drain_pending_sends(&mut self) {
         let handles: Vec<SocketHandle> = self.pending_send.keys().copied().collect();
         for handle in handles {
+            // Socket may have been removed by poll_tcp_sockets — discard stale entry
+            if !self.connections.contains_key(&handle) && !self.closing.contains(&handle) {
+                self.pending_send.remove(&handle);
+                continue;
+            }
             let socket = self.sockets.get_mut::<TcpSocket>(handle);
             let mut drained_empty = false;
             if let Some(pending) = self.pending_send.get_mut(&handle) {
