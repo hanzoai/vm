@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.4.2 (fork: rw-mounts)
+
+### CLI (`shuru-cli`)
+
+- `--mount` now accepts an optional `:rw` or `:ro` suffix: `--mount ./src:/workspace:rw`
+- Without a suffix, mounts default to read-only (no behavior change for existing users)
+- `:rw` mounts pass `readOnly: false` to `VZSharedDirectory`, enabling the guest to write directly to the host filesystem
+
+### VM (`shuru-vm`)
+
+- **Breaking:** `MountConfig` has a new required field `read_only: bool`. Consumers constructing `MountConfig` directly must add this field. Set `read_only: true` to preserve existing behavior.
+
+### SDK (`shuru-sdk`)
+
+- Re-exports the updated `MountConfig`. SDK users passing `mounts` in `SandboxConfig` must include the `read_only` field.
+
 ## 0.4.1
 
 ### CLI (`shuru-cli` 0.4.1)

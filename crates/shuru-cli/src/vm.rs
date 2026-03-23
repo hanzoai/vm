@@ -311,10 +311,29 @@ pub(crate) fn run_command(prepared: &PreparedVm, command: &[String]) -> Result<i
     Ok(exit_code)
 }
 
+/// Parse the components of a mount spec: host, guest, and optional mode (ro/rw).
+/// Pure string logic — no filesystem access.
+fn parse_mount_parts(host: &str, guest: &str, mode: Option<&str>) -> Result<MountConfig> {
+    if !guest.starts_with('/') {
+        bail!("guest path must be absolute (start with /): '{}'", guest);
+    }
+    let read_only = match mode {
+        None | Some("ro") => true,
+        Some("rw") => false,
+        Some(other) => bail!("invalid mount mode '{}': expected 'ro' or 'rw'", other),
+    };
+    Ok(MountConfig {
+        host_path: host.to_string(),
+        guest_path: guest.to_string(),
+        read_only,
+    })
+}
+
 fn parse_mount_spec(s: &str) -> Result<MountConfig> {
-    let parts: Vec<&str> = s.splitn(2, ':').collect();
+    // Split as HOST:GUEST or HOST:GUEST:MODE
+    let parts: Vec<&str> = s.splitn(3, ':').collect();
     if parts.len() < 2 {
-        bail!("expected HOST:GUEST format (e.g. ./src:/workspace)");
+        bail!("expected HOST:GUEST[:ro|rw] format (e.g. ./src:/workspace:rw)");
     }
 
     let host_path = std::fs::canonicalize(parts[0])
@@ -322,15 +341,10 @@ fn parse_mount_spec(s: &str) -> Result<MountConfig> {
         .to_string_lossy()
         .to_string();
 
-    let guest_path = parts[1].to_string();
-    if !guest_path.starts_with('/') {
-        bail!("guest path must be absolute (start with /): '{}'", guest_path);
-    }
+    let guest = parts[1];
+    let mode = parts.get(2).copied();
 
-    Ok(MountConfig {
-        host_path,
-        guest_path,
-    })
+    parse_mount_parts(&host_path, guest, mode)
 }
 
 /// Parse `NAME=ENV_VAR@host1,host2` into (name, from, hosts).
@@ -363,4 +377,38 @@ fn parse_port_mapping(s: &str) -> Result<PortMapping> {
         host_port,
         guest_port,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn mount_defaults_to_read_only() {
+        let mc = parse_mount_parts("/some/host", "/workspace", None).unwrap();
+        assert!(mc.read_only);
+        assert_eq!(mc.guest_path, "/workspace");
+    }
+
+    #[test]
+    fn mount_ro_suffix() {
+        let mc = parse_mount_parts("/some/host", "/workspace", Some("ro")).unwrap();
+        assert!(mc.read_only);
+    }
+
+    #[test]
+    fn mount_rw_suffix() {
+        let mc = parse_mount_parts("/some/host", "/workspace", Some("rw")).unwrap();
+        assert!(!mc.read_only);
+    }
+
+    #[test]
+    fn mount_rejects_bad_mode() {
+        assert!(parse_mount_parts("/some/host", "/workspace", Some("xx")).is_err());
+    }
+
+    #[test]
+    fn mount_rejects_relative_guest() {
+        assert!(parse_mount_parts("/some/host", "relative/path", None).is_err());
+    }
 }
