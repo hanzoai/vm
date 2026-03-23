@@ -179,6 +179,7 @@ impl VmConfigBuilder {
             mount_requests.push(MountRequest {
                 tag,
                 guest_path: m.guest_path.clone(),
+                read_only: m.read_only,
             });
         }
 
