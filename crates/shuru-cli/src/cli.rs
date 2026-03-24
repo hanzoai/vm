@@ -34,8 +34,8 @@ pub(crate) struct VmArgs {
     #[arg(short = 'p', long = "port", value_name = "HOST:GUEST")]
     pub port: Vec<String>,
 
-    /// Mount a host directory into the VM (HOST:GUEST)
-    #[arg(long = "mount", value_name = "HOST:GUEST")]
+    /// Mount a host directory into the VM (HOST:GUEST[:ro|:rw], default ro)
+    #[arg(long = "mount", value_name = "HOST:GUEST[:ro|:rw]")]
     pub mount: Vec<String>,
 
     /// Inject a secret via proxy (NAME=ENV_VAR@host1,host2)
