@@ -82,6 +82,50 @@ fn explicit_ro_suffix_discards_guest_writes() {
     );
 }
 
+// Verify that process_mount's create_dir_all (main.rs:68) creates the guest
+// mount point for both rw and ro paths, even when it doesn't already exist in
+// the rootfs. Without that call, mount_direct would fail on missing directories.
+
+#[test]
+#[ignore]
+fn rw_mount_creates_missing_guest_dirs() {
+    let tmp = tempdir().unwrap();
+    let host_dir = tmp.path().to_str().unwrap();
+    let spec = format!("{}:/mnt/does/not/exist:rw", host_dir);
+
+    let output = run_in_vm(&spec, "echo ok > /mnt/does/not/exist/proof.txt");
+
+    assert!(
+        output.status.success(),
+        "rw mount to non-existent guest path should succeed; stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let written = std::fs::read_to_string(tmp.path().join("proof.txt"))
+        .expect("write through rw mount at auto-created guest path should land on host");
+    assert_eq!(written.trim(), "ok");
+}
+
+#[test]
+#[ignore]
+fn ro_mount_creates_missing_guest_dirs() {
+    let tmp = tempdir().unwrap();
+    std::fs::write(tmp.path().join("hello.txt"), "from-host\n").unwrap();
+    let host_dir = tmp.path().to_str().unwrap();
+    let spec = format!("{}:/mnt/does/not/exist:ro", host_dir);
+
+    let output = run_in_vm(&spec, "cat /mnt/does/not/exist/hello.txt");
+
+    assert!(
+        output.status.success(),
+        "ro mount to non-existent guest path should succeed; stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        String::from_utf8_lossy(&output.stdout).contains("from-host"),
+        "should read host file through overlay at auto-created guest path"
+    );
+}
+
 #[test]
 #[ignore]
 fn bad_mount_mode_rejected() {
