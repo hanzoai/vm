@@ -1,5 +1,44 @@
 # Changelog
 
+## 0.5.4
+
+### CLI (`shuru-cli` 0.5.4)
+
+- Read-write mount support: `--mount ./src:/workspace:rw` (default remains read-only overlay)
+- `--allow-host-writes` flag required for `:rw` mounts (same opt-in pattern as `--allow-net`)
+- Mount host paths restricted to current working directory; `/` rejected as mount source or CWD
+- BoringSSL for upstream TLS in proxy (Chrome-like TLS fingerprint passes Cloudflare)
+- ALPN aligned to HTTP/1.1 only on MITM connections
+- DNS AAAA queries return empty NOERROR (IPv4-only VM, fixes musl getaddrinfo)
+- Removed rewrite rules from proxy
+
+### VM (`shuru-vm` 0.3.2)
+
+- `MountConfig` gains `read_only: bool` field. Consumers must add this field (`true` preserves existing behavior).
+
+### Guest (`shuru-guest` 0.3.1)
+
+- Direct VirtioFS mount for `:rw` mounts (skips overlay)
+
+### Protocol (`shuru-proto` 0.3.1)
+
+- `MountRequest.read_only` field with `serde(default = true)` for backward compatibility
+
+### Proxy (`shuru-proxy` 0.2.2)
+
+- Upstream TLS switched from rustls to BoringSSL (Cloudflare JA3/JA4 fingerprint compatibility)
+- Guest-side ALPN set to HTTP/1.1 only (matches upstream, prevents protocol mismatch)
+- DNS: empty NOERROR for AAAA queries instead of forwarding (IPv4-only stack)
+
+### SDK (`shuru-sdk` 0.3.2)
+
+- Re-exports updated `MountConfig` with `read_only` field
+
+### TypeScript SDK (`@superhq/shuru` 0.4.1)
+
+- `allowHostWrites` option in `StartOptions`
+- `mounts` values support `:rw` suffix (e.g. `{ "./src": "/workspace:rw" }`)
+
 ## 0.4.1
 
 ### CLI (`shuru-cli` 0.4.1)
