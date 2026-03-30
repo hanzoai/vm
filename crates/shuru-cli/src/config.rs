@@ -15,6 +15,8 @@ pub(crate) struct ShuruConfig {
     pub command: Option<Vec<String>>,
     pub secrets: Option<HashMap<String, SecretEntry>>,
     pub network: Option<NetworkEntry>,
+    /// Host ports to expose to the guest (e.g. "3000:8080" or "5432").
+    pub expose_host: Option<Vec<String>>,
 }
 
 /// A secret to inject via the proxy.
@@ -58,7 +60,44 @@ impl ShuruConfig {
             }
         }
 
+        if let Some(ref expose) = self.expose_host {
+            for s in expose {
+                if let Ok(mapping) = parse_expose_host(s) {
+                    proxy.expose_host.push(mapping);
+                }
+            }
+        }
+
         proxy
+    }
+}
+
+/// Parse "HOST_PORT:GUEST_PORT" or "PORT" into an ExposeHostMapping.
+pub(crate) fn parse_expose_host(s: &str) -> Result<shuru_proxy::config::ExposeHostMapping> {
+    let parts: Vec<&str> = s.split(':').collect();
+    match parts.len() {
+        1 => {
+            let port: u16 = parts[0]
+                .parse()
+                .map_err(|_| anyhow::anyhow!("invalid port: '{}'", parts[0]))?;
+            Ok(shuru_proxy::config::ExposeHostMapping {
+                host_port: port,
+                guest_port: port,
+            })
+        }
+        2 => {
+            let host_port: u16 = parts[0]
+                .parse()
+                .map_err(|_| anyhow::anyhow!("invalid host port: '{}'", parts[0]))?;
+            let guest_port: u16 = parts[1]
+                .parse()
+                .map_err(|_| anyhow::anyhow!("invalid guest port: '{}'", parts[1]))?;
+            Ok(shuru_proxy::config::ExposeHostMapping {
+                host_port,
+                guest_port,
+            })
+        }
+        _ => bail!("expected HOST_PORT:GUEST_PORT or PORT format"),
     }
 }
 

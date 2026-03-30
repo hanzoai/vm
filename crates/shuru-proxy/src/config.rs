@@ -1,4 +1,14 @@
 use std::collections::HashMap;
+use std::net::Ipv4Addr;
+
+/// A host port exposed to the guest via host.shuru.internal.
+#[derive(Debug, Clone)]
+pub struct ExposeHostMapping {
+    /// Port on the host (127.0.0.1:host_port).
+    pub host_port: u16,
+    /// Port the guest connects to (host.shuru.internal:guest_port).
+    pub guest_port: u16,
+}
 
 /// Configuration for the proxy engine.
 #[derive(Debug, Clone, Default)]
@@ -9,6 +19,8 @@ pub struct ProxyConfig {
     pub secrets: HashMap<String, SecretConfig>,
     /// Network access rules.
     pub network: NetworkConfig,
+    /// Host ports exposed to the guest via host.shuru.internal.
+    pub expose_host: Vec<ExposeHostMapping>,
 }
 
 /// A secret that the proxy injects into HTTP requests.
@@ -42,6 +54,19 @@ impl ProxyConfig {
             .allow
             .iter()
             .any(|pattern| domain_matches(pattern, domain))
+    }
+
+    /// Look up whether a connection to the gateway IP on `guest_port` should
+    /// be forwarded to a host port. Returns the host port if matched.
+    pub fn exposed_host_port(&self, dst_ip: Ipv4Addr, guest_port: u16) -> Option<u16> {
+        const GATEWAY: Ipv4Addr = Ipv4Addr::new(10, 0, 0, 1);
+        if dst_ip != GATEWAY {
+            return None;
+        }
+        self.expose_host
+            .iter()
+            .find(|m| m.guest_port == guest_port)
+            .map(|m| m.host_port)
     }
 
     /// Get all secret placeholder→real value mappings for a given domain.
@@ -86,6 +111,25 @@ fn domain_matches(pattern: &str, domain: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_exposed_host_port() {
+        use std::net::Ipv4Addr;
+        let config = ProxyConfig {
+            expose_host: vec![
+                ExposeHostMapping { host_port: 3000, guest_port: 8080 },
+                ExposeHostMapping { host_port: 5432, guest_port: 5432 },
+            ],
+            ..Default::default()
+        };
+        // Gateway IP match
+        assert_eq!(config.exposed_host_port(Ipv4Addr::new(10, 0, 0, 1), 8080), Some(3000));
+        assert_eq!(config.exposed_host_port(Ipv4Addr::new(10, 0, 0, 1), 5432), Some(5432));
+        // No mapping for this port
+        assert_eq!(config.exposed_host_port(Ipv4Addr::new(10, 0, 0, 1), 9999), None);
+        // Non-gateway IP
+        assert_eq!(config.exposed_host_port(Ipv4Addr::new(1, 2, 3, 4), 8080), None);
+    }
 
     #[test]
     fn test_domain_matching() {

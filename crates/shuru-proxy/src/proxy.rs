@@ -128,6 +128,20 @@ async fn handle_connection(
     placeholders: &HashMap<String, String>,
     upstream_ssl: SslConnector,
 ) -> anyhow::Result<()> {
+    // Check if this is a connection to an exposed host port (host.shuru.internal).
+    if let std::net::IpAddr::V4(ipv4) = dst.ip() {
+        if let Some(host_port) = config.exposed_host_port(ipv4, dst.port()) {
+            debug!("expose-host: guest :{} -> localhost:{}", dst.port(), host_port);
+            let local_dst = SocketAddr::new(
+                std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST),
+                host_port,
+            );
+            let upstream = TcpStream::connect(local_dst).await?;
+            let (mut upstream_rd, mut upstream_wr) = upstream.into_split();
+            return blind_relay(id, &mut upstream_rd, &mut upstream_wr, data_rx, cmd_tx).await;
+        }
+    }
+
     let is_tls = dst.port() == 443;
 
     if is_tls {

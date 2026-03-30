@@ -9,7 +9,7 @@ use tracing::info;
 
 // Re-exports
 pub use shuru_proto::{DirEntry, ReadDirResponse, StatResponse};
-pub use shuru_proxy::config::{NetworkConfig, ProxyConfig, SecretConfig};
+pub use shuru_proxy::config::{ExposeHostMapping, NetworkConfig, ProxyConfig, SecretConfig};
 pub use shuru_vm::{default_data_dir, MountConfig};
 
 // ---------------------------------------------------------------------------
@@ -38,6 +38,8 @@ pub struct SandboxConfig {
     pub allowed_hosts: Vec<String>,
     /// Port forwards (host → guest).
     pub ports: Vec<shuru_proto::PortMapping>,
+    /// Host ports exposed to the guest via host.shuru.internal.
+    pub expose_host: Vec<ExposeHostMapping>,
     /// Boot from a named checkpoint instead of base rootfs.
     pub from: Option<String>,
 }
@@ -54,6 +56,7 @@ impl Default for SandboxConfig {
             secrets: HashMap::new(),
             allowed_hosts: vec![],
             ports: vec![],
+            expose_host: vec![],
             from: None,
         }
     }
@@ -463,6 +466,7 @@ fn boot_vm(
         let mut proxy_config = ProxyConfig::default();
         proxy_config.secrets = config.secrets;
         proxy_config.network.allow = config.allowed_hosts;
+        proxy_config.expose_host = config.expose_host;
 
         let (vm_fd, host_fd) = shuru_proxy::create_socketpair()?;
         let handle = shuru_proxy::start(host_fd, proxy_config)?;

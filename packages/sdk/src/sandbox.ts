@@ -219,6 +219,12 @@ export function buildArgs(bin: string, opts: StartOptions): string[] {
 		}
 	}
 
+	if (opts.exposeHost) {
+		for (const e of opts.exposeHost) {
+			args.push("--expose-host", e);
+		}
+	}
+
 	if (opts.mounts) {
 		for (const [host, guest] of Object.entries(opts.mounts)) {
 			args.push("--mount", `${host}:${guest}`);

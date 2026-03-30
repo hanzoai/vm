@@ -52,6 +52,13 @@ async fn resolve_query(query_bytes: &[u8], config: &ProxyConfig) -> anyhow::Resu
         return build_empty_response(query_bytes);
     }
 
+    // Resolve host.shuru.internal to the gateway IP so the guest can
+    // reach exposed host ports without knowing the raw IP.
+    if domain == "host.shuru.internal" {
+        debug!("DNS host.shuru.internal -> 10.0.0.1");
+        return build_a_response(query_bytes, std::net::Ipv4Addr::new(10, 0, 0, 1));
+    }
+
     debug!("DNS query: {domain}");
 
     if !config.is_domain_allowed(domain) {
@@ -93,6 +100,29 @@ fn build_response_with_rcode(query_bytes: &[u8], rcode: u8) -> anyhow::Result<Ve
 
 fn build_empty_response(query_bytes: &[u8]) -> anyhow::Result<Vec<u8>> {
     build_response_with_rcode(query_bytes, 0)
+}
+
+/// Build a DNS A-record response pointing to the given IPv4 address.
+fn build_a_response(query_bytes: &[u8], addr: std::net::Ipv4Addr) -> anyhow::Result<Vec<u8>> {
+    use simple_dns::{rdata, ResourceRecord, CLASS};
+
+    let query = Packet::parse(query_bytes)?;
+    let qname = query
+        .questions
+        .first()
+        .ok_or_else(|| anyhow::anyhow!("empty DNS query"))?
+        .qname
+        .clone();
+
+    let mut reply = query.into_reply();
+    reply.answers.push(ResourceRecord::new(
+        qname,
+        CLASS::IN,
+        60,
+        rdata::RData::A(rdata::A::from(addr)),
+    ));
+
+    Ok(reply.build_bytes_vec()?)
 }
 
 fn build_refused_response(query_bytes: &[u8]) -> anyhow::Result<Vec<u8>> {

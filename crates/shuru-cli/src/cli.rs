@@ -50,6 +50,10 @@ pub(crate) struct VmArgs {
     #[arg(long = "allow-host", value_name = "PATTERN")]
     pub allow_host: Vec<String>,
 
+    /// Expose a host port to the guest via host.shuru.internal (HOST:GUEST or PORT)
+    #[arg(long = "expose-host", value_name = "HOST:GUEST", hide = true)]
+    pub expose_host: Vec<String>,
+
     /// Path to config file (default: ./shuru.json)
     #[arg(long)]
     pub config: Option<String>,

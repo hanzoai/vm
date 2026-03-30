@@ -19,6 +19,8 @@ export interface StartOptions {
 	/** Allow :rw mounts to write to host filesystem. Default: false. */
 	allowHostWrites?: boolean;
 	ports?: string[];
+	/** Host ports to expose to the guest via host.shuru.internal. Format: "HOST:GUEST" or "PORT". */
+	exposeHost?: string[];
 	/** Directory mounts. Key is host path, value is guest path or guest path with mode suffix (e.g. "/workspace" or "/workspace:rw"). */
 	mounts?: Record<string, string>;
 	secrets?: Record<string, SecretConfig>;

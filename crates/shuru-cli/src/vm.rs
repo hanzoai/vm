@@ -76,6 +76,13 @@ pub(crate) fn prepare_vm(
             proxy.network.allow.push(d.clone());
         }
 
+        // Merge --expose-host flags
+        for s in &vm.expose_host {
+            let mapping = crate::config::parse_expose_host(s)
+                .with_context(|| format!("invalid --expose-host: '{}'", s))?;
+            proxy.expose_host.push(mapping);
+        }
+
         Some(proxy)
     } else {
         None
