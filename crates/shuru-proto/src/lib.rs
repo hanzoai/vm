@@ -100,6 +100,21 @@ pub struct FsOkResponse {
 }
 
 #[derive(Serialize, Deserialize)]
+pub struct DownloadRequest {
+    pub url: String,
+    pub path: String,
+    /// If true, decompress .tar.gz and extract to `path` as a directory.
+    #[serde(default)]
+    pub extract: bool,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct DownloadProgress {
+    pub bytes_downloaded: u64,
+    pub total_bytes: Option<u64>,
+}
+
+#[derive(Serialize, Deserialize)]
 pub struct MkdirRequest {
     pub path: String,
     #[serde(default = "default_true")]
@@ -179,10 +194,39 @@ fn default_true() -> bool {
     true
 }
 
-#[derive(Serialize, Deserialize)]
+/// Binary watch event kinds.
+pub mod watch_kind {
+    pub const CREATE: u8 = 0x01;
+    pub const MODIFY: u8 = 0x02;
+    pub const DELETE: u8 = 0x03;
+    pub const RENAME: u8 = 0x04;
+}
+
+/// A filesystem watch event. Binary format: `[u8 kind][path bytes...]`
+#[derive(Debug, Clone)]
 pub struct WatchEvent {
+    pub kind: u8,
     pub path: String,
-    pub event: String,
+}
+
+impl WatchEvent {
+    /// Encode to binary payload for a WATCH_EVENT frame.
+    pub fn encode(&self) -> Vec<u8> {
+        let mut buf = Vec::with_capacity(1 + self.path.len());
+        buf.push(self.kind);
+        buf.extend_from_slice(self.path.as_bytes());
+        buf
+    }
+
+    /// Decode from binary payload of a WATCH_EVENT frame.
+    pub fn decode(payload: &[u8]) -> Option<Self> {
+        if payload.is_empty() {
+            return None;
+        }
+        let kind = payload[0];
+        let path = std::str::from_utf8(&payload[1..]).ok()?.to_string();
+        Some(Self { kind, path })
+    }
 }
 
 pub const VSOCK_PORT: u32 = 1024;

@@ -45,6 +45,10 @@ pub const RENAME_REQ: u8 = 0x48;
 pub const COPY_REQ: u8 = 0x4A;
 pub const CHMOD_REQ: u8 = 0x4C;
 
+// Download
+pub const DOWNLOAD_REQ: u8 = 0x50;
+pub const DOWNLOAD_PROGRESS: u8 = 0x51;
+
 const MAX_FRAME: u32 = 1 << 20; // 1 MB
 
 /// Write a binary frame: `[u32 BE length][u8 type][payload]`.

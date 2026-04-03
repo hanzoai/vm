@@ -432,6 +432,53 @@ impl Sandbox {
         )
     }
 
+    /// Download a URL into the sandbox. Streams progress via the callback.
+    pub fn download(
+        &self,
+        url: &str,
+        path: &str,
+        extract: bool,
+        on_progress: impl Fn(shuru_proto::DownloadProgress),
+    ) -> Result<()> {
+        let stream = self.connect_vsock()?;
+        let mut writer = stream.try_clone()?;
+        let mut reader = stream;
+
+        self.send_mount_requests(&mut writer, &mut reader)?;
+
+        let req = shuru_proto::DownloadRequest {
+            url: url.to_string(),
+            path: path.to_string(),
+            extract,
+        };
+        frame::send_json(&mut writer, frame::DOWNLOAD_REQ, &req)?;
+
+        // Read progress frames until FS_OK_RESP or ERROR
+        loop {
+            match frame::read_frame(&mut reader)? {
+                Some((frame::DOWNLOAD_PROGRESS, payload)) => {
+                    if let Ok(progress) = serde_json::from_slice::<shuru_proto::DownloadProgress>(&payload) {
+                        on_progress(progress);
+                    }
+                }
+                Some((frame::FS_OK_RESP, payload)) => {
+                    let resp: FsOkResponse = serde_json::from_slice(&payload)?;
+                    if !resp.ok {
+                        bail!("{}", resp.error.unwrap_or_else(|| "download failed".into()));
+                    }
+                    return Ok(());
+                }
+                Some((frame::ERROR, payload)) => {
+                    bail!("{}", String::from_utf8_lossy(&payload));
+                }
+                Some((other, _)) => {
+                    bail!("unexpected frame 0x{:02x} during download", other);
+                }
+                None => bail!("connection closed during download"),
+            }
+        }
+    }
+
     pub fn read_dir(&self, path: &str) -> Result<ReadDirResponse> {
         let stream = self.connect_vsock()?;
         let mut writer = stream.try_clone()?;
@@ -547,6 +594,17 @@ impl Sandbox {
         rows: u16,
         cols: u16,
     ) -> Result<TcpStream> {
+        self.open_shell_with_cwd(argv, env, rows, cols, None)
+    }
+
+    pub fn open_shell_with_cwd(
+        &self,
+        argv: &[impl AsRef<str>],
+        env: &HashMap<String, String>,
+        rows: u16,
+        cols: u16,
+        cwd: Option<&str>,
+    ) -> Result<TcpStream> {
         let stream = self.connect_vsock()?;
         let mut writer = stream.try_clone()?;
         let mut reader = stream.try_clone()?;
@@ -559,7 +617,7 @@ impl Sandbox {
             tty: Some(true),
             rows: Some(rows),
             cols: Some(cols),
-            cwd: None,
+            cwd: cwd.map(|s| s.to_string()),
         };
         frame::send_json(&mut writer, frame::EXEC_REQ, &req)?;
 

@@ -181,17 +181,8 @@ fn transmission(
 
     loop {
         if let Err(e) = stream.read_exact(&mut req_header) {
-            match e.kind() {
-                std::io::ErrorKind::UnexpectedEof => {
-                    debug!("NBD client disconnected");
-                    return Ok(());
-                }
-                std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut => {
-                    debug!("NBD read timeout, exiting");
-                    return Ok(());
-                }
-                _ => return Err(e.into()),
-            }
+            debug!("NBD session ended while reading command: {}", e);
+            return Ok(());
         }
 
         let magic = u32::from_be_bytes(req_header[0..4].try_into().unwrap());

@@ -8,6 +8,7 @@ pub use nbd::NbdBackend;
 
 use std::os::unix::net::UnixListener;
 use std::path::Path;
+use std::sync::atomic::{AtomicI32, Ordering};
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
@@ -20,6 +21,9 @@ pub struct NbdHandle {
     thread: Option<std::thread::JoinHandle<()>>,
     /// CAS backend reference for saving checkpoints. None for flat file mode.
     cas_backend: Option<Arc<CasBackend>>,
+    /// Raw fd of the active client connection, or -1 if idle.
+    /// Used by Drop to interrupt blocking reads via `libc::shutdown()`.
+    active_fd: Arc<AtomicI32>,
 }
 
 impl NbdHandle {
@@ -42,9 +46,16 @@ impl Drop for NbdHandle {
         if let Some(ref backend) = self.cas_backend {
             let _ = backend.flush();
         }
+        // Signal the accept loop to stop
         if let Some(tx) = self.shutdown.take() {
             let _ = tx.send(());
         }
+        // Interrupt any active client read by shutting down the socket
+        let fd = self.active_fd.load(Ordering::Acquire);
+        if fd >= 0 {
+            unsafe { libc::shutdown(fd, libc::SHUT_RDWR); }
+        }
+        // Unblock accept() with a dummy connection
         let _ = std::os::unix::net::UnixStream::connect(&self.socket_path);
         if let Some(thread) = self.thread.take() {
             let _ = thread.join();
@@ -64,6 +75,8 @@ fn start_nbd_with_backend(
     // Blocking accept — shutdown unblocks via dummy connect in Drop
     let (shutdown_tx, shutdown_rx) = std::sync::mpsc::channel::<()>();
     let socket_path_owned = socket_path.to_string();
+    let active_fd = Arc::new(AtomicI32::new(-1));
+    let active_fd_thread = active_fd.clone();
 
     let thread = std::thread::Builder::new()
         .name("shuru-nbd".into())
@@ -76,12 +89,16 @@ fn start_nbd_with_backend(
                             debug!("NBD server shutting down");
                             break;
                         }
-                        // Timeout so the command loop exits promptly on VM shutdown
-                        stream.set_read_timeout(Some(std::time::Duration::from_secs(2))).ok();
+                        // No read timeout — shutdown interrupts via libc::shutdown()
+                        // on the fd, which makes blocking reads return immediately.
+                        use std::os::unix::io::AsRawFd;
+                        let fd = stream.as_raw_fd();
+                        active_fd_thread.store(fd, Ordering::Release);
                         info!("NBD client connected");
                         if let Err(e) = nbd::handle_client(stream, backend.clone()) {
                             warn!("NBD client session ended: {}", e);
                         }
+                        active_fd_thread.store(-1, Ordering::Release);
                         debug!("NBD client disconnected, waiting for reconnect...");
                     }
                     Err(e) => {
@@ -100,6 +117,7 @@ fn start_nbd_with_backend(
         shutdown: Some(shutdown_tx),
         thread: Some(thread),
         cas_backend,
+        active_fd,
     })
 }
 

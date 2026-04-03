@@ -8,7 +8,7 @@ use tokio::sync::{mpsc, oneshot};
 use tracing::info;
 
 // Re-exports
-pub use shuru_proto::{DirEntry, ReadDirResponse, StatResponse};
+pub use shuru_proto::{DirEntry, ReadDirResponse, StatResponse, WatchEvent};
 pub use shuru_proxy::config::{ExposeHostMapping, NetworkConfig, ProxyConfig, SecretConfig};
 pub use shuru_vm::{default_data_dir, MountConfig};
 
@@ -134,6 +134,24 @@ impl ShellHandle {
     }
 }
 
+/// Reader half of a file watch session. Receives filesystem events asynchronously.
+pub struct WatchReceiver {
+    event_rx: mpsc::UnboundedReceiver<WatchEvent>,
+}
+
+impl WatchReceiver {
+    /// Receive the next watch event. Returns `None` when the watch ends.
+    pub async fn recv(&mut self) -> Option<WatchEvent> {
+        self.event_rx.recv().await
+    }
+}
+
+/// Handle to a filesystem watch session. Drop to stop watching.
+pub struct WatchHandle {
+    pub receiver: WatchReceiver,
+    _reader_thread: std::thread::JoinHandle<()>,
+}
+
 // ---------------------------------------------------------------------------
 // Internal command protocol (async ↔ VM thread)
 // ---------------------------------------------------------------------------
@@ -156,9 +174,39 @@ enum SandboxCmd {
         path: String,
         reply: oneshot::Sender<Result<ReadDirResponse>>,
     },
+    Mkdir {
+        path: String,
+        recursive: bool,
+        reply: oneshot::Sender<Result<()>>,
+    },
+    Rename {
+        old_path: String,
+        new_path: String,
+        reply: oneshot::Sender<Result<()>>,
+    },
+    Chmod {
+        path: String,
+        mode: u32,
+        reply: oneshot::Sender<Result<()>>,
+    },
+    Download {
+        url: String,
+        path: String,
+        extract: bool,
+        progress_tx: std::sync::mpsc::Sender<shuru_proto::DownloadProgress>,
+        reply: oneshot::Sender<Result<()>>,
+    },
     OpenShell {
+        argv: Option<Vec<String>>,
         rows: u16,
         cols: u16,
+        cwd: Option<String>,
+        extra_env: HashMap<String, String>,
+        reply: oneshot::Sender<Result<TcpStream>>,
+    },
+    Watch {
+        path: String,
+        recursive: bool,
         reply: oneshot::Sender<Result<TcpStream>>,
     },
     Checkpoint {
@@ -239,14 +287,26 @@ impl AsyncSandbox {
         self.exec(&[shell, "-c", command]).await
     }
 
-    /// Spawn an interactive shell with PTY support.
-    /// Returns a `ShellHandle` that can be split into writer/reader halves.
-    pub async fn open_shell(&self, rows: u16, cols: u16) -> Result<ShellHandle> {
+    /// Spawn an interactive PTY session.
+    /// If `argv` is None, opens a login shell (`bash -l`).
+    /// If `argv` is Some, runs that command directly (no shell wrapper).
+    /// If `cwd` is Some, the process starts in that directory.
+    pub async fn open_shell(
+        &self,
+        rows: u16,
+        cols: u16,
+        cwd: Option<&str>,
+        argv: Option<&[&str]>,
+        extra_env: HashMap<String, String>,
+    ) -> Result<ShellHandle> {
         let (reply_tx, reply_rx) = oneshot::channel();
         self.cmd_tx
             .send(SandboxCmd::OpenShell {
+                argv: argv.map(|a| a.iter().map(|s| s.to_string()).collect()),
                 rows,
                 cols,
+                cwd: cwd.map(|s| s.to_string()),
+                extra_env,
                 reply: reply_tx,
             })
             .map_err(|_| anyhow::anyhow!("VM thread exited"))?;
@@ -332,6 +392,69 @@ impl AsyncSandbox {
         reply_rx.await?
     }
 
+    /// Create a directory inside the VM. If `recursive` is true, creates
+    /// parent directories as needed (like `mkdir -p`).
+    pub async fn mkdir(&self, path: &str, recursive: bool) -> Result<()> {
+        let (reply_tx, reply_rx) = oneshot::channel();
+        self.cmd_tx
+            .send(SandboxCmd::Mkdir {
+                path: path.to_string(),
+                recursive,
+                reply: reply_tx,
+            })
+            .map_err(|_| anyhow::anyhow!("VM thread exited"))?;
+        reply_rx.await?
+    }
+
+    /// Rename a file or directory inside the VM.
+    pub async fn rename(&self, old_path: &str, new_path: &str) -> Result<()> {
+        let (reply_tx, reply_rx) = oneshot::channel();
+        self.cmd_tx
+            .send(SandboxCmd::Rename {
+                old_path: old_path.to_string(),
+                new_path: new_path.to_string(),
+                reply: reply_tx,
+            })
+            .map_err(|_| anyhow::anyhow!("VM thread exited"))?;
+        reply_rx.await?
+    }
+
+    /// Change file permissions inside the VM.
+    pub async fn chmod(&self, path: &str, mode: u32) -> Result<()> {
+        let (reply_tx, reply_rx) = oneshot::channel();
+        self.cmd_tx
+            .send(SandboxCmd::Chmod {
+                path: path.to_string(),
+                mode,
+                reply: reply_tx,
+            })
+            .map_err(|_| anyhow::anyhow!("VM thread exited"))?;
+        reply_rx.await?
+    }
+
+    /// Download a URL into the sandbox. If `extract` is true, the download
+    /// is treated as a .tar.gz and extracted to `path` as a directory.
+    /// Returns a channel that receives progress updates.
+    pub async fn download(
+        &self,
+        url: &str,
+        path: &str,
+        extract: bool,
+    ) -> Result<(tokio::sync::oneshot::Receiver<Result<()>>, std::sync::mpsc::Receiver<shuru_proto::DownloadProgress>)> {
+        let (reply_tx, reply_rx) = oneshot::channel();
+        let (progress_tx, progress_rx) = std::sync::mpsc::channel();
+        self.cmd_tx
+            .send(SandboxCmd::Download {
+                url: url.to_string(),
+                path: path.to_string(),
+                extract,
+                progress_tx,
+                reply: reply_tx,
+            })
+            .map_err(|_| anyhow::anyhow!("VM thread exited"))?;
+        Ok((reply_rx, progress_rx))
+    }
+
     /// Save the current rootfs state as a named checkpoint (CoW clone).
     /// Future VMs can boot from this checkpoint via `SandboxConfig::from`.
     pub async fn checkpoint(&self, name: &str) -> Result<()> {
@@ -343,6 +466,47 @@ impl AsyncSandbox {
             })
             .map_err(|_| anyhow::anyhow!("VM thread exited"))?;
         reply_rx.await?
+    }
+
+    /// Watch a path inside the VM for filesystem changes (inotify-backed).
+    /// Returns a handle whose receiver emits `WatchEvent`s. Drop the handle
+    /// to stop watching.
+    pub async fn open_watch(&self, path: &str, recursive: bool) -> Result<WatchHandle> {
+        let (reply_tx, reply_rx) = oneshot::channel();
+        self.cmd_tx
+            .send(SandboxCmd::Watch {
+                path: path.to_string(),
+                recursive,
+                reply: reply_tx,
+            })
+            .map_err(|_| anyhow::anyhow!("VM thread exited"))?;
+        let stream = reply_rx.await??;
+
+        let (event_tx, event_rx) = mpsc::unbounded_channel();
+
+        let reader_thread = std::thread::Builder::new()
+            .name("shuru-watch-reader".into())
+            .spawn(move || {
+                let mut reader = BufReader::new(stream);
+                loop {
+                    match shuru_proto::frame::read_frame(&mut reader) {
+                        Ok(Some((shuru_proto::frame::WATCH_EVENT, payload))) => {
+                            if let Some(event) = WatchEvent::decode(&payload) {
+                                if event_tx.send(event).is_err() {
+                                    break;
+                                }
+                            }
+                        }
+                        Ok(Some(_)) => {} // skip unknown frame types
+                        Ok(None) | Err(_) => break,
+                    }
+                }
+            })?;
+
+        Ok(WatchHandle {
+            receiver: WatchReceiver { event_rx },
+            _reader_thread: reader_thread,
+        })
     }
 
     /// Stop the VM and clean up resources.
@@ -371,6 +535,12 @@ impl Drop for AsyncSandbox {
 // ---------------------------------------------------------------------------
 // Internal: VM boot & command loop (runs on dedicated OS thread)
 // ---------------------------------------------------------------------------
+
+use std::sync::atomic::{AtomicU64, Ordering};
+
+/// Monotonic counter to ensure each SDK sandbox gets a unique instance directory,
+/// even when multiple sandboxes boot concurrently in the same process.
+static INSTANCE_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 extern "C" {
     fn clonefile(src: *const libc::c_char, dst: *const libc::c_char, flags: u32) -> libc::c_int;
@@ -433,13 +603,16 @@ fn boot_vm(
         }
     };
 
-    // Create per-instance working copy (CoW via macOS clonefile)
+    // Create per-instance working copy (CoW via macOS clonefile).
+    // Use PID + atomic counter so concurrent boots in the same process
+    // each get their own directory (avoids remove_dir_all racing).
+    let seq = INSTANCE_COUNTER.fetch_add(1, Ordering::Relaxed);
     let instance_dir = format!(
-        "{}/instances/sdk-{}",
+        "{}/instances/sdk-{}-{}",
         data_dir,
-        std::process::id()
+        std::process::id(),
+        seq,
     );
-    let _ = std::fs::remove_dir_all(&instance_dir);
     std::fs::create_dir_all(&instance_dir)?;
     let work_rootfs = format!("{}/rootfs.ext4", instance_dir);
     clone_file_cow(&source, &work_rootfs)?;
@@ -560,8 +733,32 @@ fn run_vm_loop(
             SandboxCmd::ReadDir { path, reply } => {
                 let _ = reply.send(sandbox.read_dir(&path));
             }
-            SandboxCmd::OpenShell { rows, cols, reply } => {
-                let result = sandbox.open_shell(&["/bin/bash", "-l"], &env, rows, cols);
+            SandboxCmd::Mkdir { path, recursive, reply } => {
+                let _ = reply.send(sandbox.mkdir(&path, recursive));
+            }
+            SandboxCmd::Rename { old_path, new_path, reply } => {
+                let _ = reply.send(sandbox.rename(&old_path, &new_path));
+            }
+            SandboxCmd::Chmod { path, mode, reply } => {
+                let _ = reply.send(sandbox.chmod(&path, mode));
+            }
+            SandboxCmd::Download { url, path, extract, progress_tx, reply } => {
+                let result = sandbox.download(&url, &path, extract, |p| {
+                    let _ = progress_tx.send(p);
+                });
+                let _ = reply.send(result);
+            }
+            SandboxCmd::OpenShell { argv, rows, cols, cwd, extra_env, reply } => {
+                let default_argv = ["/bin/bash".to_string(), "-l".to_string()];
+                let shell_argv: Vec<String> = argv.unwrap_or_else(|| default_argv.to_vec());
+                let shell_argv_refs: Vec<&str> = shell_argv.iter().map(|s| s.as_str()).collect();
+                let mut merged_env = env.clone();
+                merged_env.extend(extra_env);
+                let result = sandbox.open_shell_with_cwd(&shell_argv_refs, &merged_env, rows, cols, cwd.as_deref());
+                let _ = reply.send(result);
+            }
+            SandboxCmd::Watch { path, recursive, reply } => {
+                let result = sandbox.open_watch(&path, recursive);
                 let _ = reply.send(result);
             }
             SandboxCmd::Checkpoint { name, reply } => {

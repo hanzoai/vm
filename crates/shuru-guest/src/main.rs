@@ -7,10 +7,10 @@ mod guest {
 
     use shuru_proto::frame;
     use shuru_proto::{
-        ChmodRequest, CopyRequest, DirEntry, ExecRequest, ForwardRequest, ForwardResponse,
-        FsOkResponse, MkdirRequest, MountRequest, MountResponse, ReadDirRequest, ReadDirResponse,
-        ReadFileRequest, RemoveRequest, RenameRequest, StatRequest, StatResponse, WatchEvent,
-        WatchRequest, WriteFileRequest, WriteFileResponse,
+        ChmodRequest, CopyRequest, DirEntry, DownloadProgress, DownloadRequest, ExecRequest,
+        ForwardRequest, ForwardResponse, FsOkResponse, MkdirRequest, MountRequest, MountResponse,
+        ReadDirRequest, ReadDirResponse, ReadFileRequest, RemoveRequest, RenameRequest,
+        StatRequest, StatResponse, WatchEvent, WatchRequest, WriteFileRequest, WriteFileResponse,
     };
     use shuru_proto::{VSOCK_PORT, VSOCK_PORT_FORWARD};
 
@@ -465,6 +465,17 @@ mod guest {
                     };
                     handle_chmod(&req, &mut writer);
                 }
+                frame::DOWNLOAD_REQ => {
+                    let req: DownloadRequest = match serde_json::from_slice(&payload) {
+                        Ok(r) => r,
+                        Err(e) => {
+                            let msg = format!("invalid download request: {}", e);
+                            let _ = frame::write_frame(&mut writer, frame::ERROR, msg.as_bytes());
+                            continue;
+                        }
+                    };
+                    handle_download(&req, &mut writer);
+                }
                 _ => {} // unknown type, skip
             }
         }
@@ -550,6 +561,116 @@ mod guest {
         match result {
             Ok(()) => send_fs_ok(writer),
             Err(e) => send_fs_err(writer, format!("mkdir {}: {}", req.path, e)),
+        }
+    }
+
+    fn handle_download(req: &DownloadRequest, writer: &mut impl Write) {
+        let response = match ureq::get(&req.url).call() {
+            Ok(r) => r,
+            Err(e) => {
+                send_fs_err(writer, format!("download failed: {e}"));
+                return;
+            }
+        };
+
+        let total_bytes = response
+            .headers()
+            .get("content-length")
+            .and_then(|v| v.to_str().ok())
+            .and_then(|v| v.parse::<u64>().ok());
+
+        let mut body = response.into_body().into_reader();
+
+        if req.extract {
+            // Stream through gzip + tar, reporting progress
+            let progress_writer = DownloadProgressWriter { writer, bytes: 0, total_bytes, last_report: 0 };
+            let tee = TeeReader::new(&mut body, progress_writer);
+            let decoder = flate2::read::GzDecoder::new(tee);
+            let mut archive = tar::Archive::new(decoder);
+
+            if let Err(e) = std::fs::create_dir_all(&req.path) {
+                send_fs_err(writer, format!("mkdir {}: {e}", req.path));
+                return;
+            }
+            if let Err(e) = archive.unpack(&req.path) {
+                send_fs_err(writer, format!("extract to {}: {e}", req.path));
+                return;
+            }
+        } else {
+            // Download to a single file
+            if let Some(parent) = std::path::Path::new(&req.path).parent() {
+                let _ = std::fs::create_dir_all(parent);
+            }
+            let mut file = match std::fs::File::create(&req.path) {
+                Ok(f) => f,
+                Err(e) => {
+                    send_fs_err(writer, format!("create {}: {e}", req.path));
+                    return;
+                }
+            };
+
+            let mut buf = [0u8; 65536];
+            let mut bytes_downloaded: u64 = 0;
+            let mut last_report: u64 = 0;
+            loop {
+                match body.read(&mut buf) {
+                    Ok(0) => break,
+                    Ok(n) => {
+                        if file.write_all(&buf[..n]).is_err() {
+                            send_fs_err(writer, format!("write {}: I/O error", req.path));
+                            return;
+                        }
+                        bytes_downloaded += n as u64;
+                        if bytes_downloaded - last_report >= 65536 {
+                            last_report = bytes_downloaded;
+                            let progress = DownloadProgress { bytes_downloaded, total_bytes };
+                            let _ = frame::send_json(writer, frame::DOWNLOAD_PROGRESS, &progress);
+                        }
+                    }
+                    Err(e) => {
+                        send_fs_err(writer, format!("download read: {e}"));
+                        return;
+                    }
+                }
+            }
+        }
+
+        send_fs_ok(writer);
+    }
+
+    /// Reader wrapper that reports download progress through the frame protocol.
+    struct DownloadProgressWriter<'a, W: Write> {
+        writer: &'a mut W,
+        bytes: u64,
+        total_bytes: Option<u64>,
+        last_report: u64,
+    }
+
+    /// Tee reader: reads from inner, writes to writer (for progress tracking).
+    struct TeeReader<'a, R: Read, W: Write> {
+        inner: R,
+        progress: DownloadProgressWriter<'a, W>,
+    }
+
+    impl<'a, R: Read, W: Write> TeeReader<'a, R, W> {
+        fn new(inner: R, progress: DownloadProgressWriter<'a, W>) -> Self {
+            Self { inner, progress }
+        }
+    }
+
+    impl<'a, R: Read, W: Write> Read for TeeReader<'a, R, W> {
+        fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+            let n = self.inner.read(buf)?;
+            self.progress.bytes += n as u64;
+            if self.progress.bytes - self.progress.last_report >= 65536 {
+                self.progress.last_report = self.progress.bytes;
+                let progress = DownloadProgress {
+                    bytes_downloaded: self.progress.bytes,
+                    total_bytes: self.progress.total_bytes,
+                };
+                let _ = frame::send_json(self.progress.writer, frame::DOWNLOAD_PROGRESS, &progress);
+            }
+            Ok(n)
         }
     }
 
@@ -909,31 +1030,28 @@ mod guest {
                         format!("{}/{}", dir, filename)
                     };
 
-                    let event_type = if event.mask & libc::IN_CREATE != 0 {
-                        "create"
-                    } else if event.mask & libc::IN_MODIFY != 0 {
-                        "modify"
-                    } else if event.mask & libc::IN_DELETE != 0 {
-                        "delete"
-                    } else if event.mask & (libc::IN_MOVED_FROM | libc::IN_MOVED_TO) != 0 {
-                        "rename"
-                    } else {
+                    if event.mask & (libc::IN_CREATE | libc::IN_MODIFY | libc::IN_DELETE | libc::IN_MOVED_FROM | libc::IN_MOVED_TO) == 0 {
                         continue;
-                    };
+                    }
 
                     // If a new directory was created, add watches
                     if event.mask & libc::IN_CREATE != 0 && event.mask & libc::IN_ISDIR != 0 {
                         add_watches(inotify_fd, &full_path, mask, &mut wd_to_path, req.recursive);
                     }
 
-                    let evt = WatchEvent {
-                        path: full_path,
-                        event: event_type.to_string(),
+                    let kind = if event.mask & libc::IN_CREATE != 0 {
+                        shuru_proto::watch_kind::CREATE
+                    } else if event.mask & libc::IN_MODIFY != 0 {
+                        shuru_proto::watch_kind::MODIFY
+                    } else if event.mask & libc::IN_DELETE != 0 {
+                        shuru_proto::watch_kind::DELETE
+                    } else {
+                        shuru_proto::watch_kind::RENAME
                     };
-                    if let Ok(payload) = serde_json::to_vec(&evt) {
-                        if frame::write_frame(&mut writer, frame::WATCH_EVENT, &payload).is_err() {
-                            break;
-                        }
+                    let evt = WatchEvent { kind, path: full_path };
+                    let payload = evt.encode();
+                    if frame::write_frame(&mut writer, frame::WATCH_EVENT, &payload).is_err() {
+                        break;
                     }
                 }
             }

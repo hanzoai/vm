@@ -1330,9 +1330,12 @@ dependencies = [
 name = "shuru-guest"
 version = "0.3.1"
 dependencies = [
+ "flate2",
  "libc",
  "serde_json",
  "shuru-proto",
+ "tar",
+ "ureq",
 ]
 
 [[package]]
