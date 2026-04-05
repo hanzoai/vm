@@ -38,5 +38,6 @@ jobs:
           publish shuru-proto
           publish shuru-darwin
           publish shuru-proxy
+          publish shuru-store
           publish shuru-vm
           publish shuru-sdk
