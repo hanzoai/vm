@@ -182,6 +182,10 @@ Once installed, agents will use `shuru run` whenever they need sandboxed executi
 
 See [CHANGELOG.md](CHANGELOG.md) for release notes and breaking changes.
 
+## Support
+
+<a href="https://buymeacoffee.com/harshdoesdev" target="_blank"><img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy Me A Coffee" height="40"></a>
+
 ## Bugs
 
 File issues at [github.com/superhq-ai/shuru/issues](https://github.com/superhq-ai/shuru/issues).

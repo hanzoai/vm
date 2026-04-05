@@ -1,5 +1,68 @@
 # Changelog
 
+## 0.5.5
+
+### Store (`shuru-store` 0.1.1)
+
+- Content-addressable chunk store with BLAKE3 hashing and local filesystem backend
+- NBD (Network Block Device) server for serving VM disks from the chunk store
+- `ChunkIndex` with parent-chain resolution for delta-only checkpoints
+- Lazy ingestion: chunks read from flat rootfs on first access, no upfront conversion
+- S3 chunk store backend
+
+### CLI (`shuru-cli` 0.5.5)
+
+- CAS-backed VM disks via NBD: `shuru run` now uses the chunk store by default
+- `SHURU_STORAGE=direct` env var to fall back to flat file mode
+- Checkpoints saved as `.idx` (CAS delta index) when CAS is active, `.ext4` otherwise
+- `checkpoint list` shows storage type and size for CAS checkpoints
+- `--expose-host` flag for forwarding host ports to the guest via `host.shuru.internal`
+- `--disk-size` flag to set the VM disk size
+
+### VM (`shuru-vm` 0.3.3)
+
+- NBD storage support: `SandboxBuilder::nbd_uri()` for attaching NBD-backed block devices
+- `download()` method on `Sandbox` for downloading and extracting archives inside the guest
+- Port forwarding for host-exposed ports via vsock
+
+### Rust SDK (`shuru-sdk` 0.3.3)
+
+- CAS storage support behind the `cas` feature flag
+- `StorageMode` enum: `Direct` (default, flat file with CoW) or `Cas { cas_dir }` for chunk store
+- Checkpoints saved as `.idx` when CAS is active, `.ext4` otherwise
+- `download()` method with progress reporting
+- `open_watch()` for inotify-backed filesystem change events
+- `discard_overlay()` to revert file changes in overlay mounts
+- File management: `read_dir()`, `mkdir()`, `rename()`, `chmod()`, `remove()`
+- `expose_host` config for forwarding host ports to the guest
+- `open_shell()` gains `cwd` and `extra_env` parameters
+
+### Guest (`shuru-guest` 0.3.2)
+
+- Download handler: fetch URLs, optionally extract `.tar.gz` archives, with progress reporting
+- File management ops: `mkdir`, `read_dir`, `stat`, `remove`, `rename`, `copy`, `chmod`
+- Filesystem watching via `inotify` with recursive directory support
+- Overlay discard support for reverting file changes
+
+### Protocol (`shuru-proto` 0.3.2)
+
+- `Download`, `DownloadProgress` types for in-guest downloads
+- `ReadDir`, `Mkdir`, `Rename`, `Chmod`, `Remove`, `DiscardOverlay` request/response types
+- `DOWNLOAD_REQ`, `DOWNLOAD_PROGRESS` frame types
+
+### Proxy (`shuru-proxy` 0.2.3)
+
+- `ExposeHostMapping` config and DNS interception for `host.shuru.internal`
+- Exposed host ports resolved to `127.0.0.1` on the host side
+
+### Darwin (`shuru-darwin` 0.1.1)
+
+- `VZNetworkBlockDeviceStorageDeviceAttachment` support for NBD-backed disks
+
+### TypeScript SDK (`@superhq/shuru` 0.4.2)
+
+- `exposeHost` option in `StartOptions` for forwarding host ports to the guest
+
 ## 0.5.4
 
 ### CLI (`shuru-cli` 0.5.4)

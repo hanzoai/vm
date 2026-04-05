@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.2 (2026-04-05)
+
+### Added
+
+- `exposeHost` option in `StartOptions` for forwarding host ports to the guest via `host.shuru.internal`. Format: `"HOST:GUEST"` or `"PORT"`.
+
 ## 0.4.0 (2026-03-13)
 
 ### Added
