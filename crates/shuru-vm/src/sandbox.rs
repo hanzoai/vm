@@ -16,11 +16,11 @@ use shuru_darwin::network::FileHandleNetworkAttachment;
 #[cfg(target_os = "macos")]
 use shuru_darwin::*;
 
-#[cfg(target_os = "linux")]
+#[cfg(all(target_os = "linux", feature = "shuru-linux"))]
 use shuru_linux::terminal;
-#[cfg(target_os = "linux")]
+#[cfg(all(target_os = "linux", feature = "shuru-linux"))]
 use shuru_linux::network::FileHandleNetworkAttachment;
-#[cfg(target_os = "linux")]
+#[cfg(all(target_os = "linux", feature = "shuru-linux"))]
 use shuru_linux::*;
 
 use shuru_proto::{

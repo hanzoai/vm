@@ -17,11 +17,11 @@ pub use shuru_darwin::VmState;
 #[cfg(target_os = "macos")]
 pub use shuru_darwin::VzError;
 
-#[cfg(target_os = "linux")]
+#[cfg(all(target_os = "linux", feature = "shuru-linux"))]
 pub use shuru_linux::VirtualMachine;
-#[cfg(target_os = "linux")]
+#[cfg(all(target_os = "linux", feature = "shuru-linux"))]
 pub use shuru_linux::VmState;
-#[cfg(target_os = "linux")]
+#[cfg(all(target_os = "linux", feature = "shuru-linux"))]
 pub use shuru_linux::VzError;
 
 /// Reject checkpoint names that could escape the checkpoints directory.
