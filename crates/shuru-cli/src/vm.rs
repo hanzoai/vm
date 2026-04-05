@@ -4,6 +4,7 @@ use std::io::IsTerminal;
 
 use anyhow::{bail, Context, Result};
 
+#[cfg(target_os = "macos")]
 extern "C" {
     fn clonefile(
         src: *const libc::c_char,
@@ -12,6 +13,7 @@ extern "C" {
     ) -> libc::c_int;
 }
 
+#[cfg(target_os = "macos")]
 pub(crate) fn clone_file(src: &str, dst: &str) -> Result<()> {
     let c_src = CString::new(src).context("invalid source path")?;
     let c_dst = CString::new(dst).context("invalid destination path")?;
@@ -20,6 +22,13 @@ pub(crate) fn clone_file(src: &str, dst: &str) -> Result<()> {
         let err = std::io::Error::last_os_error();
         bail!("clonefile({} -> {}) failed: {}", src, dst, err);
     }
+    Ok(())
+}
+
+#[cfg(target_os = "linux")]
+pub(crate) fn clone_file(src: &str, dst: &str) -> Result<()> {
+    std::fs::copy(src, dst)
+        .with_context(|| format!("failed to copy {} -> {}", src, dst))?;
     Ok(())
 }
 

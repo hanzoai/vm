@@ -144,6 +144,11 @@ impl WatchReceiver {
     pub async fn recv(&mut self) -> Option<WatchEvent> {
         self.event_rx.recv().await
     }
+
+    /// Try to receive a buffered event without blocking.
+    pub fn try_recv(&mut self) -> Result<WatchEvent, tokio::sync::mpsc::error::TryRecvError> {
+        self.event_rx.try_recv()
+    }
 }
 
 /// Handle to a filesystem watch session. Drop to stop watching.
@@ -208,6 +213,15 @@ enum SandboxCmd {
         path: String,
         recursive: bool,
         reply: oneshot::Sender<Result<TcpStream>>,
+    },
+    Remove {
+        path: String,
+        recursive: bool,
+        reply: oneshot::Sender<Result<()>>,
+    },
+    DiscardOverlay {
+        path: String,
+        reply: oneshot::Sender<Result<()>>,
     },
     Checkpoint {
         name: String,
@@ -380,6 +394,32 @@ impl AsyncSandbox {
         reply_rx.await?
     }
 
+    /// Discard overlay changes for a file. Removes it from the overlay upper dir,
+    /// revealing the original host version from the lower layer.
+    pub async fn discard_overlay(&self, path: &str) -> Result<()> {
+        let (reply_tx, reply_rx) = oneshot::channel();
+        self.cmd_tx
+            .send(SandboxCmd::DiscardOverlay {
+                path: path.to_string(),
+                reply: reply_tx,
+            })
+            .map_err(|_| anyhow::anyhow!("VM thread exited"))?;
+        reply_rx.await?
+    }
+
+    /// Remove a file or directory inside the VM.
+    pub async fn remove(&self, path: &str, recursive: bool) -> Result<()> {
+        let (reply_tx, reply_rx) = oneshot::channel();
+        self.cmd_tx
+            .send(SandboxCmd::Remove {
+                path: path.to_string(),
+                recursive,
+                reply: reply_tx,
+            })
+            .map_err(|_| anyhow::anyhow!("VM thread exited"))?;
+        reply_rx.await?
+    }
+
     /// List directory contents in the VM.
     pub async fn read_dir(&self, path: &str) -> Result<ReadDirResponse> {
         let (reply_tx, reply_rx) = oneshot::channel();
@@ -542,10 +582,12 @@ use std::sync::atomic::{AtomicU64, Ordering};
 /// even when multiple sandboxes boot concurrently in the same process.
 static INSTANCE_COUNTER: AtomicU64 = AtomicU64::new(0);
 
+#[cfg(target_os = "macos")]
 extern "C" {
     fn clonefile(src: *const libc::c_char, dst: *const libc::c_char, flags: u32) -> libc::c_int;
 }
 
+#[cfg(target_os = "macos")]
 fn clone_file_cow(src: &str, dst: &str) -> Result<()> {
     let c_src = std::ffi::CString::new(src).context("invalid source path")?;
     let c_dst = std::ffi::CString::new(dst).context("invalid destination path")?;
@@ -554,6 +596,13 @@ fn clone_file_cow(src: &str, dst: &str) -> Result<()> {
         let err = std::io::Error::last_os_error();
         bail!("clonefile({} -> {}) failed: {}", src, dst, err);
     }
+    Ok(())
+}
+
+#[cfg(target_os = "linux")]
+fn clone_file_cow(src: &str, dst: &str) -> Result<()> {
+    std::fs::copy(src, dst)
+        .with_context(|| format!("failed to copy {} -> {}", src, dst))?;
     Ok(())
 }
 
@@ -760,6 +809,12 @@ fn run_vm_loop(
             SandboxCmd::Watch { path, recursive, reply } => {
                 let result = sandbox.open_watch(&path, recursive);
                 let _ = reply.send(result);
+            }
+            SandboxCmd::Remove { path, recursive, reply } => {
+                let _ = reply.send(sandbox.remove(&path, recursive));
+            }
+            SandboxCmd::DiscardOverlay { path, reply } => {
+                let _ = reply.send(sandbox.discard_overlay(&path));
             }
             SandboxCmd::Checkpoint { name, reply } => {
                 let result = (|| -> Result<()> {

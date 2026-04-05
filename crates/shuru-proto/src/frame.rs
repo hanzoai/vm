@@ -45,6 +45,10 @@ pub const RENAME_REQ: u8 = 0x48;
 pub const COPY_REQ: u8 = 0x4A;
 pub const CHMOD_REQ: u8 = 0x4C;
 
+// Overlay operations
+pub const DISCARD_REQ: u8 = 0x4E;
+pub const DISCARD_RESP: u8 = 0x4F;
+
 // Download
 pub const DOWNLOAD_REQ: u8 = 0x50;
 pub const DOWNLOAD_PROGRESS: u8 = 0x51;

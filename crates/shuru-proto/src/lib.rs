@@ -161,6 +161,14 @@ pub struct RemoveRequest {
     pub recursive: bool,
 }
 
+/// Discard overlay changes for a file: removes it from the overlay upper dir,
+/// revealing the original host version from the lower layer.
+#[derive(Serialize, Deserialize)]
+pub struct DiscardRequest {
+    /// Path relative to the overlay mount (e.g., "/workspace/src/main.rs")
+    pub path: String,
+}
+
 #[derive(Serialize, Deserialize)]
 pub struct RenameRequest {
     pub old_path: String,

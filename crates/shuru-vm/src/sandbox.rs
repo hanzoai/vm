@@ -9,15 +9,26 @@ use std::time::Duration;
 use anyhow::{bail, Context, Result};
 use crossbeam_channel::Receiver;
 
+#[cfg(target_os = "macos")]
 use shuru_darwin::terminal;
+#[cfg(target_os = "macos")]
 use shuru_darwin::network::FileHandleNetworkAttachment;
+#[cfg(target_os = "macos")]
 use shuru_darwin::*;
 
+#[cfg(target_os = "linux")]
+use shuru_linux::terminal;
+#[cfg(target_os = "linux")]
+use shuru_linux::network::FileHandleNetworkAttachment;
+#[cfg(target_os = "linux")]
+use shuru_linux::*;
+
 use shuru_proto::{
-    frame, ChmodRequest, CopyRequest, ExecRequest, ForwardRequest, ForwardResponse, FsOkResponse,
-    MkdirRequest, MountRequest, MountResponse, PortMapping, ReadDirRequest, ReadDirResponse,
-    ReadFileRequest, RemoveRequest, RenameRequest, StatRequest, StatResponse, WatchRequest,
-    WriteFileRequest, WriteFileResponse, VSOCK_PORT, VSOCK_PORT_FORWARD,
+    frame, ChmodRequest, CopyRequest, DiscardRequest, ExecRequest, ForwardRequest,
+    ForwardResponse, FsOkResponse, MkdirRequest, MountRequest, MountResponse, PortMapping,
+    ReadDirRequest, ReadDirResponse, ReadFileRequest, RemoveRequest, RenameRequest, StatRequest,
+    StatResponse, WatchRequest, WriteFileRequest, WriteFileResponse, VSOCK_PORT,
+    VSOCK_PORT_FORWARD,
 };
 
 // --- Mount types ---
@@ -531,6 +542,15 @@ impl Sandbox {
         self.void_fs_op(
             frame::REMOVE_REQ,
             &RemoveRequest { path: path.to_string(), recursive },
+        )
+    }
+
+    /// Discard overlay changes for a file: removes it from the upper dir,
+    /// revealing the original host version from the lower layer.
+    pub fn discard_overlay(&self, path: &str) -> Result<()> {
+        self.void_fs_op(
+            frame::DISCARD_REQ,
+            &DiscardRequest { path: path.to_string() },
         )
     }
 

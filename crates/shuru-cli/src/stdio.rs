@@ -626,10 +626,10 @@ pub(crate) fn run_stdio(prepared: &PreparedVm) -> Result<i32> {
                     loop {
                         match frame::read_frame(&mut reader) {
                             Ok(Some((frame::WATCH_EVENT, data))) => {
-                                if let Ok(evt) = serde_json::from_slice::<WatchEvent>(&data) {
+                                if let Some(evt) = WatchEvent::decode(&data) {
                                     let _ = tx.send(Event::FileChange {
                                         path: evt.path,
-                                        event: evt.event,
+                                        event: evt.kind.to_string(),
                                     });
                                 }
                             }

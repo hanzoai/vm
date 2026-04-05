@@ -7,10 +7,11 @@ mod guest {
 
     use shuru_proto::frame;
     use shuru_proto::{
-        ChmodRequest, CopyRequest, DirEntry, DownloadProgress, DownloadRequest, ExecRequest,
-        ForwardRequest, ForwardResponse, FsOkResponse, MkdirRequest, MountRequest, MountResponse,
-        ReadDirRequest, ReadDirResponse, ReadFileRequest, RemoveRequest, RenameRequest,
-        StatRequest, StatResponse, WatchEvent, WatchRequest, WriteFileRequest, WriteFileResponse,
+        ChmodRequest, CopyRequest, DirEntry, DiscardRequest, DownloadProgress, DownloadRequest,
+        ExecRequest, ForwardRequest, ForwardResponse, FsOkResponse, MkdirRequest, MountRequest,
+        MountResponse, ReadDirRequest, ReadDirResponse, ReadFileRequest, RemoveRequest,
+        RenameRequest, StatRequest, StatResponse, WatchEvent, WatchRequest, WriteFileRequest,
+        WriteFileResponse,
     };
     use shuru_proto::{VSOCK_PORT, VSOCK_PORT_FORWARD};
 
@@ -432,6 +433,17 @@ mod guest {
                     };
                     handle_remove(&req, &mut writer);
                 }
+                frame::DISCARD_REQ => {
+                    let req: DiscardRequest = match serde_json::from_slice(&payload) {
+                        Ok(r) => r,
+                        Err(e) => {
+                            let msg = format!("invalid discard request: {}", e);
+                            let _ = frame::write_frame(&mut writer, frame::ERROR, msg.as_bytes());
+                            continue;
+                        }
+                    };
+                    handle_discard(&req, &mut writer);
+                }
                 frame::RENAME_REQ => {
                     let req: RenameRequest = match serde_json::from_slice(&payload) {
                         Ok(r) => r,
@@ -736,6 +748,98 @@ mod guest {
         }
     }
 
+    fn handle_discard(req: &DiscardRequest, writer: &mut impl Write) {
+        // Find the overlay upper dir for the mount point containing this path
+        let mount_point = if req.path.starts_with("/workspace") {
+            "/workspace"
+        } else {
+            return send_fs_err(writer, format!("discard: unsupported path {}", req.path));
+        };
+
+        let upper_dir = match resolve_overlay_upper(mount_point) {
+            Some((upper, _, _)) => upper,
+            None => {
+                return send_fs_err(writer, "discard: not an overlay mount".to_string());
+            }
+        };
+
+        // Map /workspace/foo/bar.rs → {upper_dir}/foo/bar.rs
+        let rel = req.path.strip_prefix(mount_point).unwrap_or(&req.path);
+        let upper_path = format!("{}{}", upper_dir, rel);
+
+        // The entry might be:
+        //  1. A modified/created file or dir in the upper → remove it
+        //  2. A whiteout (char device 0,0) for a deleted file → remove it
+        //  3. Nothing at this exact path, but a parent dir is opaque
+        //     (whole directory was deleted) → remove the opaque xattr
+        //     from the nearest opaque ancestor so the lower entry shows through
+
+        let upper = std::path::Path::new(&upper_path);
+        let result = if upper.is_dir() {
+            std::fs::remove_dir_all(&upper_path)
+        } else if upper.exists() || upper.symlink_metadata().is_ok() {
+            // exists() returns false for whiteouts/special files, but
+            // symlink_metadata succeeds for any inode including char devices
+            std::fs::remove_file(&upper_path)
+        } else {
+            // Nothing at this path in upper — check for an opaque parent dir.
+            // Walk up from the target to find the nearest opaque directory and
+            // remove it entirely so the whole subtree from lower is restored.
+            match find_opaque_ancestor(&upper_dir, rel) {
+                Some(opaque_dir) => std::fs::remove_dir_all(&opaque_dir),
+                None => Err(std::io::Error::new(
+                    std::io::ErrorKind::NotFound,
+                    format!("nothing to discard at {}", upper_path),
+                )),
+            }
+        };
+
+        match result {
+            Ok(()) => {
+                // Drop the kernel's dentry/inode cache so the overlay VFS
+                // re-reads from lower+upper after our direct upper-dir mutation.
+                let _ = std::fs::write("/proc/sys/vm/drop_caches", b"2");
+                send_fs_ok(writer);
+            }
+            Err(e) => send_fs_err(writer, format!("discard {}: {}", upper_path, e)),
+        }
+    }
+
+    /// Walk up from `rel` (e.g. "/src/main.rs") looking for an opaque directory
+    /// in the upper dir. Returns the full upper path of the opaque dir if found.
+    fn find_opaque_ancestor(upper_dir: &str, rel: &str) -> Option<String> {
+        let mut current = rel;
+        loop {
+            let (parent, _) = current.rsplit_once('/')?;
+            if parent.is_empty() {
+                return None; // reached root, nothing to do
+            }
+            let candidate = format!("{}{}", upper_dir, parent);
+            let p = std::path::Path::new(&candidate);
+            if p.is_dir() && is_overlay_opaque(&candidate) {
+                return Some(candidate);
+            }
+            current = parent;
+        }
+    }
+
+    /// Check if a directory has the overlay opaque xattr (trusted.overlay.opaque=y).
+    fn is_overlay_opaque(path: &str) -> bool {
+        use std::ffi::CString;
+        let Ok(c_path) = CString::new(path) else { return false };
+        let attr = c"trusted.overlay.opaque";
+        let mut buf = [0u8; 2];
+        let ret = unsafe {
+            libc::getxattr(
+                c_path.as_ptr(),
+                attr.as_ptr(),
+                buf.as_mut_ptr() as *mut libc::c_void,
+                buf.len(),
+            )
+        };
+        ret == 1 && buf[0] == b'y'
+    }
+
     fn handle_rename(req: &RenameRequest, writer: &mut impl Write) {
         match std::fs::rename(&req.old_path, &req.new_path) {
             Ok(()) => send_fs_ok(writer),
@@ -933,130 +1037,128 @@ mod guest {
         }
     }
 
-    fn handle_watch(req: &WatchRequest, mut writer: std::net::TcpStream) {
-        use std::collections::HashMap;
-        use std::ffi::CString;
-        use std::os::unix::io::AsRawFd;
+    /// Find the overlay upper dir for a mount point by parsing /proc/mounts.
+    /// Returns (watch_path, prefix_to_strip, prefix_to_add) if overlay found.
+    fn resolve_overlay_upper(mount_point: &str) -> Option<(String, String, String)> {
+        let mounts = std::fs::read_to_string("/proc/mounts").ok()?;
+        for line in mounts.lines() {
+            let parts: Vec<&str> = line.split_whitespace().collect();
+            if parts.len() < 4 { continue; }
+            if parts[0] != "overlay" || parts[1] != mount_point { continue; }
+            // Parse mount options to find upperdir=...
+            for opt in parts[3].split(',') {
+                if let Some(upper) = opt.strip_prefix("upperdir=") {
+                    return Some((
+                        upper.to_string(),       // watch this path
+                        upper.to_string(),        // strip this prefix from events
+                        mount_point.to_string(),  // replace with this
+                    ));
+                }
+            }
+        }
+        None
+    }
 
-        let inotify_fd = unsafe { libc::inotify_init1(libc::IN_NONBLOCK) };
-        if inotify_fd < 0 {
-            let _ = frame::write_frame(&mut writer, frame::ERROR, b"inotify_init failed");
+    fn handle_watch(req: &WatchRequest, mut writer: std::net::TcpStream) {
+        use std::os::unix::io::AsRawFd;
+        use notify::{RecursiveMode, Watcher};
+
+        // Watch the overlay upper dir (tmpfs) where inotify works correctly,
+        // instead of the overlay mount where inotify is unreliable.
+        let (watch_dir, path_rewrite) = match resolve_overlay_upper(&req.path) {
+            Some((upper, strip, add)) => (upper, Some((strip, add))),
+            None => (req.path.clone(), None),
+        };
+
+        let (tx, rx) = std::sync::mpsc::channel();
+
+        let mut watcher = match notify::recommended_watcher(
+            move |res: Result<notify::Event, notify::Error>| {
+                if let Ok(event) = res {
+                    let _ = tx.send(event);
+                }
+            },
+        ) {
+            Ok(w) => w,
+            Err(_) => return,
+        };
+
+        if watcher.watch(
+            std::path::Path::new(&watch_dir),
+            RecursiveMode::Recursive,
+        ).is_err() {
             return;
         }
 
-        let mask = libc::IN_CREATE | libc::IN_MODIFY | libc::IN_DELETE
-            | libc::IN_MOVED_FROM | libc::IN_MOVED_TO;
+        let gitignore = {
+            let mut builder = ignore::gitignore::GitignoreBuilder::new(&req.path);
+            let _ = builder.add_line(None, ".git");
+            builder.add(format!("{}/.gitignore", req.path));
+            builder.build().unwrap_or_else(|_| {
+                let mut b = ignore::gitignore::GitignoreBuilder::new(&req.path);
+                let _ = b.add_line(None, ".git");
+                b.build().unwrap()
+            })
+        };
 
-        let mut wd_to_path: HashMap<i32, String> = HashMap::new();
+        let watch_prefix = std::path::PathBuf::from(&watch_dir);
+        let vsock_raw = writer.as_raw_fd();
 
-        fn add_watches(
-            inotify_fd: i32,
-            path: &str,
-            mask: u32,
-            wd_to_path: &mut HashMap<i32, String>,
-            recursive: bool,
-        ) {
-            let c_path = match CString::new(path) {
-                Ok(p) => p,
-                Err(_) => return,
-            };
-            let wd = unsafe { libc::inotify_add_watch(inotify_fd, c_path.as_ptr(), mask) };
-            if wd >= 0 {
-                wd_to_path.insert(wd, path.to_string());
-            }
-            if !recursive {
-                return;
-            }
-            let entries = match std::fs::read_dir(path) {
-                Ok(e) => e,
-                Err(_) => return,
-            };
-            for entry in entries.flatten() {
-                if let Ok(ft) = entry.file_type() {
-                    if ft.is_dir() {
-                        if let Some(p) = entry.path().to_str() {
-                            add_watches(inotify_fd, p, mask, wd_to_path, true);
+        loop {
+            // Block until next event (or timeout to check vsock hangup)
+            match rx.recv_timeout(std::time::Duration::from_millis(500)) {
+                Ok(event) => {
+                    // Drain buffered events
+                    let mut events = vec![event];
+                    while let Ok(ev) = rx.try_recv() {
+                        events.push(ev);
+                    }
+
+                    for event in events {
+                        for path in &event.paths {
+                            if gitignore.matched(path, path.is_dir()).is_ignore() {
+                                continue;
+                            }
+                            // Skip directory events — we only care about files
+                            if path.is_dir() {
+                                continue;
+                            }
+
+                            let path_str = match path.to_str() {
+                                Some(p) => p,
+                                None => continue,
+                            };
+
+                            // Translate upper dir path back to workspace path
+                            let reported = match &path_rewrite {
+                                Some((strip, add)) => {
+                                    if let Some(rel) = path_str.strip_prefix(strip.as_str()) {
+                                        format!("{}{}", add, rel)
+                                    } else {
+                                        path_str.to_string()
+                                    }
+                                }
+                                None => path_str.to_string(),
+                            };
+
+                            let kind = if event.kind.is_remove() {
+                                shuru_proto::watch_kind::DELETE
+                            } else {
+                                shuru_proto::watch_kind::MODIFY
+                            };
+
+                            let evt = WatchEvent { kind, path: reported };
+                            if frame::write_frame(&mut writer, frame::WATCH_EVENT, &evt.encode()).is_err() {
+                                return;
+                            }
                         }
                     }
                 }
-            }
-        }
-
-        add_watches(inotify_fd, &req.path, mask, &mut wd_to_path, req.recursive);
-
-        let vsock_raw = writer.as_raw_fd();
-        let mut buf = [0u8; 4096];
-
-        loop {
-            let mut fds = [libc::pollfd {
-                fd: inotify_fd,
-                events: libc::POLLIN,
-                revents: 0,
-            }];
-            let ret = unsafe { libc::poll(fds.as_mut_ptr(), 1, 500) };
-
-            if ret > 0 && (fds[0].revents & libc::POLLIN != 0) {
-                let n = unsafe {
-                    libc::read(inotify_fd, buf.as_mut_ptr() as *mut libc::c_void, buf.len())
-                };
-                if n <= 0 {
-                    continue;
-                }
-
-                let mut offset = 0usize;
-                while offset < n as usize {
-                    if offset + std::mem::size_of::<libc::inotify_event>() > n as usize {
-                        break;
-                    }
-                    let event = unsafe {
-                        &*(buf.as_ptr().add(offset) as *const libc::inotify_event)
-                    };
-                    let name_len = event.len as usize;
-                    offset += std::mem::size_of::<libc::inotify_event>() + name_len;
-
-                    let dir = wd_to_path.get(&event.wd).map(|s| s.as_str()).unwrap_or("");
-                    let filename = if name_len > 0 {
-                        let name_start = offset - name_len;
-                        let name_bytes = &buf[name_start..offset];
-                        let end = name_bytes.iter().position(|&b| b == 0).unwrap_or(name_bytes.len());
-                        std::str::from_utf8(&name_bytes[..end]).unwrap_or("")
-                    } else {
-                        ""
-                    };
-
-                    let full_path = if filename.is_empty() {
-                        dir.to_string()
-                    } else {
-                        format!("{}/{}", dir, filename)
-                    };
-
-                    if event.mask & (libc::IN_CREATE | libc::IN_MODIFY | libc::IN_DELETE | libc::IN_MOVED_FROM | libc::IN_MOVED_TO) == 0 {
-                        continue;
-                    }
-
-                    // If a new directory was created, add watches
-                    if event.mask & libc::IN_CREATE != 0 && event.mask & libc::IN_ISDIR != 0 {
-                        add_watches(inotify_fd, &full_path, mask, &mut wd_to_path, req.recursive);
-                    }
-
-                    let kind = if event.mask & libc::IN_CREATE != 0 {
-                        shuru_proto::watch_kind::CREATE
-                    } else if event.mask & libc::IN_MODIFY != 0 {
-                        shuru_proto::watch_kind::MODIFY
-                    } else if event.mask & libc::IN_DELETE != 0 {
-                        shuru_proto::watch_kind::DELETE
-                    } else {
-                        shuru_proto::watch_kind::RENAME
-                    };
-                    let evt = WatchEvent { kind, path: full_path };
-                    let payload = evt.encode();
-                    if frame::write_frame(&mut writer, frame::WATCH_EVENT, &payload).is_err() {
-                        break;
-                    }
-                }
+                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
+                Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
             }
 
-            // Check if vsock peer hung up (host closed connection = stop watching)
+            // Check vsock hangup
             let mut vfds = [libc::pollfd {
                 fd: vsock_raw,
                 events: 0,
@@ -1067,8 +1169,6 @@ mod guest {
                 break;
             }
         }
-
-        unsafe { libc::close(inotify_fd) };
     }
 
     fn handle_tty_exec(vsock_fd: i32, req: &ExecRequest) {

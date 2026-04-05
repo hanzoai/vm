@@ -9,10 +9,20 @@ pub use shuru_proto::{
 };
 pub use sandbox::{MountConfig, PortForwardHandle, Sandbox, VmConfigBuilder};
 
-// Re-exports from shuru-darwin for advanced/escape-hatch use
+// Re-exports from platform-specific backend for advanced/escape-hatch use
+#[cfg(target_os = "macos")]
 pub use shuru_darwin::VirtualMachine;
+#[cfg(target_os = "macos")]
 pub use shuru_darwin::VmState;
+#[cfg(target_os = "macos")]
 pub use shuru_darwin::VzError;
+
+#[cfg(target_os = "linux")]
+pub use shuru_linux::VirtualMachine;
+#[cfg(target_os = "linux")]
+pub use shuru_linux::VmState;
+#[cfg(target_os = "linux")]
+pub use shuru_linux::VzError;
 
 /// Reject checkpoint names that could escape the checkpoints directory.
 pub fn validate_checkpoint_name(name: &str) -> Result<(), String> {
