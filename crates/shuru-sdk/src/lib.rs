@@ -16,6 +16,20 @@ pub use shuru_vm::{default_data_dir, MountConfig};
 // Public types
 // ---------------------------------------------------------------------------
 
+/// Storage backend for the VM's root disk.
+#[derive(Debug, Clone, Default)]
+pub enum StorageMode {
+    /// Direct disk image attachment (CoW clone on macOS, copy on Linux).
+    #[default]
+    Direct,
+    /// Content-addressable chunk store via NBD. Requires the `cas` feature.
+    #[cfg(feature = "cas")]
+    Cas {
+        /// Directory for the CAS chunk store. Defaults to `<data_dir>/cas`.
+        cas_dir: Option<String>,
+    },
+}
+
 /// Configuration for booting a sandbox VM.
 #[derive(Debug, Clone)]
 pub struct SandboxConfig {
@@ -42,6 +56,8 @@ pub struct SandboxConfig {
     pub expose_host: Vec<ExposeHostMapping>,
     /// Boot from a named checkpoint instead of base rootfs.
     pub from: Option<String>,
+    /// Storage backend mode. Default: Direct (flat file with CoW).
+    pub storage: StorageMode,
 }
 
 impl Default for SandboxConfig {
@@ -58,6 +74,7 @@ impl Default for SandboxConfig {
             ports: vec![],
             expose_host: vec![],
             from: None,
+            storage: StorageMode::default(),
         }
     }
 }
@@ -256,11 +273,20 @@ impl AsyncSandbox {
             .name("shuru-vm".into())
             .spawn(move || {
                 match boot_vm(config) {
-                    Ok((sandbox, instance_dir, proxy_handle, fwd_handle)) => {
-                        if ready_tx.send(Ok(instance_dir.clone())).is_err() {
+                    Ok(booted) => {
+                        if ready_tx.send(Ok(booted.instance_dir.clone())).is_err() {
                             return;
                         }
-                        run_vm_loop(sandbox, &instance_dir, cmd_rx, proxy_handle, fwd_handle);
+                        run_vm_loop(
+                            booted.sandbox,
+                            &booted.instance_dir,
+                            &booted.data_dir,
+                            cmd_rx,
+                            booted.proxy_handle,
+                            booted.fwd_handle,
+                            #[cfg(feature = "cas")]
+                            booted.nbd_handle,
+                        );
                     }
                     Err(e) => {
                         let _ = ready_tx.send(Err(e));
@@ -606,14 +632,17 @@ fn clone_file_cow(src: &str, dst: &str) -> Result<()> {
     Ok(())
 }
 
-fn boot_vm(
-    config: SandboxConfig,
-) -> Result<(
-    shuru_vm::Sandbox,
-    String, // instance_dir
-    Option<shuru_proxy::ProxyHandle>,
-    Option<shuru_vm::PortForwardHandle>,
-)> {
+struct BootedVm {
+    sandbox: shuru_vm::Sandbox,
+    instance_dir: String,
+    data_dir: String,
+    proxy_handle: Option<shuru_proxy::ProxyHandle>,
+    fwd_handle: Option<shuru_vm::PortForwardHandle>,
+    #[cfg(feature = "cas")]
+    nbd_handle: Option<shuru_store::NbdHandle>,
+}
+
+fn boot_vm(config: SandboxConfig) -> Result<BootedVm> {
     let data_dir = config
         .data_dir
         .unwrap_or_else(shuru_vm::default_data_dir);
@@ -631,15 +660,38 @@ fn boot_vm(
     }
 
     // Determine rootfs source (checkpoint or base)
+    let checkpoints_dir = format!("{}/checkpoints", data_dir);
+    #[allow(unused_mut, unused_variables)]
+    let mut cas_index: Option<String> = None;
+
     let source = match &config.from {
         Some(name) => {
             shuru_vm::validate_checkpoint_name(name)
                 .map_err(|e| anyhow::anyhow!(e))?;
-            let path = format!("{}/checkpoints/{}.ext4", data_dir, name);
-            if !std::path::Path::new(&path).exists() {
-                bail!("Checkpoint '{}' not found", name);
+
+            // Check .idx (CAS) first, then .ext4 (legacy)
+            #[cfg(feature = "cas")]
+            {
+                let idx_path = format!("{}/{}.idx", checkpoints_dir, name);
+                let ext4_path = format!("{}/{}.ext4", checkpoints_dir, name);
+                if std::path::Path::new(&idx_path).exists() {
+                    cas_index = Some(idx_path.clone());
+                    idx_path
+                } else if std::path::Path::new(&ext4_path).exists() {
+                    ext4_path
+                } else {
+                    bail!("Checkpoint '{}' not found", name);
+                }
             }
-            path
+
+            #[cfg(not(feature = "cas"))]
+            {
+                let path = format!("{}/{}.ext4", checkpoints_dir, name);
+                if !std::path::Path::new(&path).exists() {
+                    bail!("Checkpoint '{}' not found", name);
+                }
+                path
+            }
         }
         None => {
             if !std::path::Path::new(&rootfs_path).exists() {
@@ -652,7 +704,13 @@ fn boot_vm(
         }
     };
 
-    // Create per-instance working copy (CoW via macOS clonefile).
+    // Determine whether to use NBD-backed CAS storage
+    #[cfg(feature = "cas")]
+    let use_nbd = cas_index.is_some() || matches!(config.storage, StorageMode::Cas { .. });
+    #[cfg(not(feature = "cas"))]
+    let use_nbd = false;
+
+    // Create per-instance working copy.
     // Use PID + atomic counter so concurrent boots in the same process
     // each get their own directory (avoids remove_dir_all racing).
     let seq = INSTANCE_COUNTER.fetch_add(1, Ordering::Relaxed);
@@ -664,18 +722,55 @@ fn boot_vm(
     );
     std::fs::create_dir_all(&instance_dir)?;
     let work_rootfs = format!("{}/rootfs.ext4", instance_dir);
-    clone_file_cow(&source, &work_rootfs)?;
 
-    // Extend disk to requested size
-    let f = std::fs::OpenOptions::new()
-        .write(true)
-        .open(&work_rootfs)?;
-    let target = config.disk_size_mb * 1024 * 1024;
-    let current = f.metadata()?.len();
-    if target > current {
-        f.set_len(target)?;
+    if use_nbd {
+        // CAS mode: NBD server handles I/O, just need a placeholder file
+        std::fs::File::create(&work_rootfs)?;
+    } else {
+        // Direct mode: CoW clone the source rootfs
+        clone_file_cow(&source, &work_rootfs)?;
     }
-    drop(f);
+
+    // Extend disk to requested size (only meaningful for direct mode)
+    if !use_nbd {
+        let f = std::fs::OpenOptions::new()
+            .write(true)
+            .open(&work_rootfs)?;
+        let target = config.disk_size_mb * 1024 * 1024;
+        let current = f.metadata()?.len();
+        if target > current {
+            f.set_len(target)?;
+        }
+        drop(f);
+    }
+
+    // Start CAS NBD server if needed
+    #[cfg(feature = "cas")]
+    let nbd_handle = if use_nbd {
+        let socket_path = format!("{}/nbd.sock", instance_dir);
+        let cas_dir_str = match &config.storage {
+            StorageMode::Cas { cas_dir } => cas_dir
+                .clone()
+                .unwrap_or_else(|| format!("{}/cas", data_dir)),
+            _ => format!("{}/cas", data_dir),
+        };
+        let index_path = if let Some(ref idx) = cas_index {
+            idx.clone()
+        } else {
+            let source_hash = blake3::hash(source.as_bytes()).to_hex();
+            format!("{}/cas/indexes/{}.idx", data_dir, &source_hash[..16])
+        };
+        let target_size = config.disk_size_mb * 1024 * 1024;
+        Some(shuru_store::start_cas_nbd_server(
+            &source,
+            &cas_dir_str,
+            &index_path,
+            &socket_path,
+            target_size,
+        )?)
+    } else {
+        None
+    };
 
     let initrd_path = if std::path::Path::new(&initrd_path_str).exists() {
         Some(initrd_path_str)
@@ -708,6 +803,10 @@ fn boot_vm(
     if let Some(fd) = vm_fd {
         builder = builder.network_fd(fd);
     }
+    #[cfg(feature = "cas")]
+    if let Some(ref handle) = nbd_handle {
+        builder = builder.nbd_uri(handle.uri());
+    }
     if let Some(ref initrd) = initrd_path {
         builder = builder.initrd(initrd);
     }
@@ -718,8 +817,8 @@ fn boot_vm(
     let sandbox = builder.build()?;
 
     info!(
-        "booting VM ({}cpus, {}MB RAM, {}MB disk)",
-        config.cpus, config.memory_mb, config.disk_size_mb
+        "booting VM ({}cpus, {}MB RAM, {}MB disk, storage={:?})",
+        config.cpus, config.memory_mb, config.disk_size_mb, config.storage
     );
 
     sandbox.start()?;
@@ -748,15 +847,25 @@ fn boot_vm(
 
     info!("VM ready");
 
-    Ok((sandbox, instance_dir, proxy_handle, fwd_handle))
+    Ok(BootedVm {
+        sandbox,
+        instance_dir,
+        data_dir,
+        proxy_handle,
+        fwd_handle,
+        #[cfg(feature = "cas")]
+        nbd_handle,
+    })
 }
 
 fn run_vm_loop(
     sandbox: shuru_vm::Sandbox,
     instance_dir: &str,
+    data_dir: &str,
     cmd_rx: std::sync::mpsc::Receiver<SandboxCmd>,
     proxy_handle: Option<shuru_proxy::ProxyHandle>,
     _fwd_handle: Option<shuru_vm::PortForwardHandle>,
+    #[cfg(feature = "cas")] nbd_handle: Option<shuru_store::NbdHandle>,
 ) {
     // Secret placeholder env vars — passed to all commands
     let env: HashMap<String, String> = proxy_handle
@@ -820,9 +929,22 @@ fn run_vm_loop(
                 let result = (|| -> Result<()> {
                     shuru_vm::validate_checkpoint_name(&name)
                         .map_err(|e| anyhow::anyhow!(e))?;
-                    let data_dir = shuru_vm::default_data_dir();
                     let checkpoints_dir = format!("{}/checkpoints", data_dir);
                     std::fs::create_dir_all(&checkpoints_dir)?;
+
+                    // CAS path: save as .idx via NbdHandle
+                    #[cfg(feature = "cas")]
+                    if let Some(ref handle) = nbd_handle {
+                        let index_path = format!("{}/{}.idx", checkpoints_dir, name);
+                        if std::path::Path::new(&index_path).exists() {
+                            std::fs::remove_file(&index_path)?;
+                        }
+                        handle.save_checkpoint(&index_path)?;
+                        info!("checkpoint '{}' saved (CAS)", name);
+                        return Ok(());
+                    }
+
+                    // Direct path: save as .ext4 via CoW clone
                     let checkpoint_path = format!("{}/{}.ext4", checkpoints_dir, name);
                     if std::path::Path::new(&checkpoint_path).exists() {
                         std::fs::remove_file(&checkpoint_path)?;

@@ -98,10 +98,13 @@ impl ProxyConfig {
 }
 
 /// Simple wildcard domain matching.
+/// "*" matches any domain (catch-all).
 /// "*.example.com" matches "api.example.com" but not "example.com".
 /// "example.com" matches exactly "example.com".
 fn domain_matches(pattern: &str, domain: &str) -> bool {
-    if let Some(suffix) = pattern.strip_prefix("*.") {
+    if pattern == "*" {
+        true
+    } else if let Some(suffix) = pattern.strip_prefix("*.") {
         domain.ends_with(suffix) && domain.len() > suffix.len() && domain.as_bytes()[domain.len() - suffix.len() - 1] == b'.'
     } else {
         pattern == domain
@@ -133,6 +136,8 @@ mod tests {
 
     #[test]
     fn test_domain_matching() {
+        assert!(domain_matches("*", "anything.com"));
+        assert!(domain_matches("*", "api.example.com"));
         assert!(domain_matches("example.com", "example.com"));
         assert!(!domain_matches("example.com", "api.example.com"));
         assert!(domain_matches("*.example.com", "api.example.com"));

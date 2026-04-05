@@ -1570,9 +1570,11 @@ name = "shuru-sdk"
 version = "0.3.2"
 dependencies = [
  "anyhow",
+ "blake3",
  "libc",
  "shuru-proto",
  "shuru-proxy",
+ "shuru-store",
  "shuru-vm",
  "tokio",
  "tracing",
