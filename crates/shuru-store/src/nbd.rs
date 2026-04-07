@@ -44,6 +44,7 @@ const NBD_FLAG_SEND_FLUSH: u16 = 1 << 2;
 // Option types
 const NBD_OPT_EXPORT_NAME: u32 = 1;
 const NBD_OPT_ABORT: u32 = 2;
+const NBD_OPT_INFO: u32 = 6;
 const NBD_OPT_GO: u32 = 7;
 
 // Option reply types
@@ -126,22 +127,13 @@ fn handshake(
                 debug!("NBD handshake complete (EXPORT_NAME), size={}", backend.size());
                 return Ok(());
             }
-            NBD_OPT_GO => {
-                // Modern negotiation: send NBD_REP_INFO then NBD_REP_ACK
-                let trans_flags = NBD_FLAG_HAS_FLAGS | NBD_FLAG_SEND_FLUSH;
-
-                // Send NBD_INFO_EXPORT
-                let mut info = Vec::with_capacity(12);
-                info.extend_from_slice(&NBD_INFO_EXPORT.to_be_bytes());
-                info.extend_from_slice(&backend.size().to_be_bytes());
-                info.extend_from_slice(&trans_flags.to_be_bytes());
-                send_option_reply(stream, option, NBD_REP_INFO, &info)?;
-
-                // Send ACK
-                send_option_reply(stream, option, NBD_REP_ACK, &[])?;
-                stream.flush()?;
-                debug!("NBD handshake complete (GO), size={}", backend.size());
-                return Ok(());
+            NBD_OPT_INFO | NBD_OPT_GO => {
+                send_export_info(stream, option, backend)?;
+                if option == NBD_OPT_GO {
+                    debug!("NBD handshake complete (GO), size={}", backend.size());
+                    return Ok(());
+                }
+                debug!("NBD INFO reply sent, size={}", backend.size());
             }
             NBD_OPT_ABORT => {
                 send_option_reply(stream, option, NBD_REP_ACK, &[])?;
@@ -155,6 +147,21 @@ fn handshake(
             }
         }
     }
+}
+
+fn send_export_info(
+    stream: &mut std::os::unix::net::UnixStream,
+    option: u32,
+    backend: &dyn NbdBackend,
+) -> std::io::Result<()> {
+    let trans_flags = NBD_FLAG_HAS_FLAGS | NBD_FLAG_SEND_FLUSH;
+    let mut info = [0u8; 12];
+    info[0..2].copy_from_slice(&NBD_INFO_EXPORT.to_be_bytes());
+    info[2..10].copy_from_slice(&backend.size().to_be_bytes());
+    info[10..12].copy_from_slice(&trans_flags.to_be_bytes());
+    send_option_reply(stream, option, NBD_REP_INFO, &info)?;
+    send_option_reply(stream, option, NBD_REP_ACK, &[])?;
+    stream.flush()
 }
 
 fn send_option_reply(
