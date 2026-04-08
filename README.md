@@ -189,3 +189,13 @@ See [CHANGELOG.md](CHANGELOG.md) for release notes and breaking changes.
 ## Bugs
 
 File issues at [github.com/superhq-ai/shuru/issues](https://github.com/superhq-ai/shuru/issues).
+
+## Star History
+
+<a href="https://www.star-history.com/?repos=superhq-ai%2Fshuru&type=date&legend=top-left">
+ <picture>
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=superhq-ai/shuru&type=date&theme=dark&legend=top-left" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=superhq-ai/shuru&type=date&legend=top-left" />
+   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=superhq-ai/shuru&type=date&legend=top-left" />
+ </picture>
+</a>
