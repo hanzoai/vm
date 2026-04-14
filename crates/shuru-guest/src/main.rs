@@ -1098,12 +1098,11 @@ mod guest {
         use std::os::unix::io::AsRawFd;
         use notify::{RecursiveMode, Watcher};
 
-        // Watch the overlay upper dir (tmpfs) where inotify works correctly,
-        // instead of the overlay mount where inotify is unreliable.
-        let (watch_dir, path_rewrite) = match resolve_overlay_upper(&req.path) {
-            Some((upper, strip, add)) => (upper, Some((strip, add))),
-            None => (req.path.clone(), None),
-        };
+        // Watch the overlay mount directly. Linux >= 5.11 propagates inotify
+        // events from the upper layer through to the merged mount, so we see
+        // creates/modifies/deletes with proper file paths in the caller's
+        // namespace — no whiteout char devices, no path rewriting.
+        let watch_dir = req.path.clone();
 
         let (tx, rx) = std::sync::mpsc::channel();
 
@@ -1136,7 +1135,6 @@ mod guest {
             })
         };
 
-        let watch_prefix = std::path::PathBuf::from(&watch_dir);
         let vsock_raw = writer.as_raw_fd();
 
         loop {
@@ -1150,39 +1148,29 @@ mod guest {
                     }
 
                     for event in events {
+                        // Access events (open/read/close) are noise for diff
+                        // tracking and agent hooks alike — only real content
+                        // changes matter.
+                        if matches!(event.kind, notify::EventKind::Access(_)) {
+                            continue;
+                        }
                         for path in &event.paths {
                             if gitignore.matched(path, path.is_dir()).is_ignore() {
                                 continue;
                             }
-                            // Skip directory events — we only care about files
                             if path.is_dir() {
                                 continue;
                             }
-
                             let path_str = match path.to_str() {
                                 Some(p) => p,
                                 None => continue,
                             };
-
-                            // Translate upper dir path back to workspace path
-                            let reported = match &path_rewrite {
-                                Some((strip, add)) => {
-                                    if let Some(rel) = path_str.strip_prefix(strip.as_str()) {
-                                        format!("{}{}", add, rel)
-                                    } else {
-                                        path_str.to_string()
-                                    }
-                                }
-                                None => path_str.to_string(),
-                            };
-
                             let kind = if event.kind.is_remove() {
                                 shuru_proto::watch_kind::DELETE
                             } else {
                                 shuru_proto::watch_kind::MODIFY
                             };
-
-                            let evt = WatchEvent { kind, path: reported };
+                            let evt = WatchEvent { kind, path: path_str.to_string() };
                             if frame::write_frame(&mut writer, frame::WATCH_EVENT, &evt.encode()).is_err() {
                                 return;
                             }

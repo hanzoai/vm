@@ -903,20 +903,34 @@ fn run_vm_loop(
     // Additional port forward handles added at runtime
     let mut extra_fwd_handles: Vec<shuru_vm::PortForwardHandle> = Vec::new();
 
+    // Wrap in Arc so read-type commands (ReadFile/ReadDir) can fan out to
+    // worker threads and run concurrently — each `sandbox.read_file` opens
+    // its own vsock connection, so there's no contention to serialize.
+    let sandbox = Arc::new(sandbox);
+
     while let Ok(cmd) = cmd_rx.recv() {
         match cmd {
             SandboxCmd::Exec { argv, reply } => {
                 let result = exec_command(&sandbox, &argv, &env);
                 let _ = reply.send(result);
             }
+            // Reads open their own vsock connection per call and don't mutate
+            // state, so fan them out onto worker threads — otherwise a burst
+            // of UI stats requests serializes behind the dispatcher.
             SandboxCmd::ReadFile { path, reply } => {
-                let _ = reply.send(sandbox.read_file(&path));
+                let sb = sandbox.clone();
+                std::thread::spawn(move || {
+                    let _ = reply.send(sb.read_file(&path));
+                });
+            }
+            SandboxCmd::ReadDir { path, reply } => {
+                let sb = sandbox.clone();
+                std::thread::spawn(move || {
+                    let _ = reply.send(sb.read_dir(&path));
+                });
             }
             SandboxCmd::WriteFile { path, content, reply } => {
                 let _ = reply.send(sandbox.write_file(&path, &content));
-            }
-            SandboxCmd::ReadDir { path, reply } => {
-                let _ = reply.send(sandbox.read_dir(&path));
             }
             SandboxCmd::Mkdir { path, recursive, reply } => {
                 let _ = reply.send(sandbox.mkdir(&path, recursive));
