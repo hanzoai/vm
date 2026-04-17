@@ -1,5 +1,38 @@
 # Changelog
 
+## 0.6.1
+
+### Linux backend: correct wall clock and working directory mounts
+
+Two gaps in the experimental Linux KVM backend are closed. Both were verified
+live on an AWS `a1.metal` ARM64 instance.
+
+### Linux backend (`shuru-linux` 0.2.0)
+
+- **PL031 RTC.** Exposes host wall clock to the guest via a minimal PL031
+  MMIO device + FDT node. Fixes guests booting with clock pinned at
+  1970-01-01, which previously broke every TLS handshake inside the sandbox
+  ("certificate not yet valid"). Kernel already had `CONFIG_RTC_DRV_PL031`
+  and `CONFIG_RTC_HCTOSYS`, so the system clock is seeded from `/dev/rtc0`
+  at boot.
+- **In-process virtio-fs passthrough.** `--mount` now works on Linux. The
+  VMM speaks the FUSE wire protocol directly over the virtio-fs queue and
+  forwards ops to the host filesystem via libc/std::fs. No external
+  `virtiofsd` daemon or extra crate required. Covers INIT, LOOKUP, FORGET
+  (single + batch), GETATTR, SETATTR, OPEN/READ/WRITE/RELEASE, OPENDIR and
+  READDIR(PLUS), CREATE, UNLINK/MKDIR/RMDIR/RENAME(2), STATFS, FLUSH,
+  FSYNC(DIR), ACCESS, and xattr stubs. Read-only mounts reject writes with
+  EROFS at the op layer.
+
+### VM (`shuru-vm` 0.3.6)
+
+- `VmCreateConfig` gains a `mounts: Vec<(tag, host_path, read_only)>` field
+  wired through from the existing `set_directory_sharing_devices()` plumbing.
+
+### CLI (`shuru-cli` 0.6.1)
+
+- Picks up the Linux backend fixes; no CLI-facing changes.
+
 ## 0.6.0
 
 ### Experimental Linux ARM64 support
