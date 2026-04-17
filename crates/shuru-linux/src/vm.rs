@@ -47,6 +47,7 @@ impl VirtualMachine {
             network_mac: inner.network_mac,
             has_vsock: inner.has_socket,
             guest_cid: layout::GUEST_CID,
+            mounts: inner.mounts.clone(),
         };
 
         match kvm::KvmVm::create(create_config) {

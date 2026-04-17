@@ -1,5 +1,6 @@
 pub mod layout;
 pub mod devices;
+pub mod virtio_fs;
 
 use std::fs::File;
 use std::io::Read;
@@ -55,6 +56,8 @@ pub struct VmCreateConfig {
     pub network_mac: Option<[u8; 6]>,
     pub has_vsock: bool,
     pub guest_cid: u64,
+    /// Virtio-fs mounts: (tag, host_path, read_only).
+    pub mounts: Vec<(String, String, bool)>,
 }
 
 impl KvmVm {
@@ -162,6 +165,25 @@ impl KvmVm {
                 VIRTIO_MMIO_SIZE,
                 Box::new(VirtioMmioDevice::new(
                     Box::new(VhostVsockBackend::new(guest_cid)),
+                    spi,
+                    vm_fd.clone(),
+                    mem.clone(),
+                )),
+            );
+            virtio_idx += 1;
+        }
+
+        // Virtio-fs mounts (one device per mount)
+        for (tag, host_path, read_only) in &config.mounts {
+            let fs = virtio_fs::VirtioFsBackend::new(tag, host_path, *read_only)
+                .map_err(|e| VzError::new(format!("failed to set up virtio-fs for tag '{}': {}", tag, e)))?;
+            let spi = VIRTIO_SPI_BASE + virtio_idx;
+            let base = VIRTIO_MMIO_BASE + (virtio_idx as u64) * VIRTIO_MMIO_GAP;
+            bus.add(
+                base,
+                VIRTIO_MMIO_SIZE,
+                Box::new(VirtioMmioDevice::new(
+                    Box::new(fs),
                     spi,
                     vm_fd.clone(),
                     mem.clone(),
