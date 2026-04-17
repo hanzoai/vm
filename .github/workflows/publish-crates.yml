@@ -23,7 +23,8 @@ jobs:
         run: |
           publish() {
             local crate=$1
-            if output=$(cargo publish -p "$crate" 2>&1); then
+            shift
+            if output=$(cargo publish -p "$crate" "$@" 2>&1); then
               echo "Published $crate"
               echo "Waiting for crates.io to index..."
               sleep 30
@@ -37,7 +38,10 @@ jobs:
 
           publish shuru-proto
           publish shuru-darwin
-          publish shuru-linux
+          # shuru-linux depends on KVM crates that only compile on Linux.
+          # The macos-14 runner cannot verify-build it, so skip verification.
+          # It's still source-verified on Linux via the release workflow.
+          publish shuru-linux --no-verify
           publish shuru-proxy
           publish shuru-store
           publish shuru-vm
