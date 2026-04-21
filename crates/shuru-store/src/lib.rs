@@ -135,10 +135,13 @@ pub fn start_cas_nbd_server(
     let (index, fallback, source_idx) = if Path::new(index_path).exists() {
         info!("loading CAS index from {}", index_path);
         let idx = ChunkIndex::load(index_path)?;
-        // If the index has a fallback_path, open it for chain resolution
+        // If the index has a fallback_path, open it and validate disk_size
         let fb = idx.fallback_path.as_ref().and_then(|p| {
             FlatFileBackend::open(p).ok()
         });
+        if let Some(ref fb) = fb {
+            idx.check_size_against_backend(fb.size(), "fallback file")?;
+        }
         (idx, fb, Some(index_path.to_string()))
     } else {
         // No index yet — create empty index with fallback to flat file for lazy ingestion

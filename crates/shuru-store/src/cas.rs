@@ -64,6 +64,7 @@ impl ChunkStore for LocalChunkStore {
 
 /// Index mapping chunk positions to hashes. One index per disk image / checkpoint.
 /// ZERO entries mean "ask parent" — enables delta-only checkpoints.
+#[derive(Debug)]
 pub struct ChunkIndex {
     hashes: Vec<String>,
     disk_size: u64,
@@ -139,6 +140,13 @@ impl ChunkIndex {
         f.read_exact(&mut buf8)?;
         let num_chunks = u64::from_le_bytes(buf8) as usize;
 
+        let expected_chunks = ((disk_size + CHUNK_SIZE as u64 - 1) / CHUNK_SIZE as u64) as usize;
+        anyhow::ensure!(
+            num_chunks == expected_chunks,
+            "index {}: chunk count {} does not match disk_size {} (expected {})",
+            path, num_chunks, disk_size, expected_chunks,
+        );
+
         // Parent path
         let mut buf4 = [0u8; 4];
         f.read_exact(&mut buf4)?;
@@ -171,6 +179,16 @@ impl ChunkIndex {
         }
 
         Ok(ChunkIndex { hashes, disk_size, parent_path, fallback_path })
+    }
+
+    /// Validate that disk_size does not exceed the given backing store size.
+    pub fn check_size_against_backend(&self, backend_size: u64, label: &str) -> Result<()> {
+        anyhow::ensure!(
+            self.disk_size <= backend_size,
+            "index disk_size ({}) exceeds {} size ({})",
+            self.disk_size, label, backend_size,
+        );
+        Ok(())
     }
 }
 
@@ -475,5 +493,31 @@ mod tests {
         let mut buf = vec![0u8; data.len()];
         backend.read(offset, &mut buf).unwrap();
         assert_eq!(&buf, data);
+    }
+
+    #[test]
+    fn test_load_rejects_mismatched_chunk_count() {
+        let tmp = tempfile::tempdir().unwrap();
+        let idx_path = tmp.path().join("bad.idx");
+
+        // Write an index with disk_size=64KB (1 chunk) but num_chunks=100
+        let mut f = fs::File::create(&idx_path).unwrap();
+        f.write_all(&(CHUNK_SIZE as u64).to_le_bytes()).unwrap(); // disk_size
+        f.write_all(&100u64.to_le_bytes()).unwrap(); // num_chunks (should be 1)
+        f.write_all(&0u32.to_le_bytes()).unwrap(); // parent_path len
+        f.write_all(&0u32.to_le_bytes()).unwrap(); // fallback_path len
+        drop(f);
+
+        let err = ChunkIndex::load(idx_path.to_str().unwrap()).unwrap_err();
+        assert!(err.to_string().contains("chunk count"), "{}", err);
+    }
+
+    #[test]
+    fn test_check_size_against_backend() {
+        let index = ChunkIndex::new(1024 * 1024); // 1MB
+        assert!(index.check_size_against_backend(1024 * 1024, "test").is_ok());
+        assert!(index.check_size_against_backend(2 * 1024 * 1024, "test").is_ok());
+        let err = index.check_size_against_backend(512 * 1024, "test").unwrap_err();
+        assert!(err.to_string().contains("exceeds"), "{}", err);
     }
 }
