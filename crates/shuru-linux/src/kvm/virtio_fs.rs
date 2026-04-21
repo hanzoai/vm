@@ -1273,7 +1273,7 @@ impl VirtioFsBackend {
             Some(p) => p,
             None => return (-libc::ENOENT, 0),
         };
-        let wants_write = req.flags as i32 & (libc::O_WRONLY | libc::O_RDWR | libc::O_APPEND) != 0;
+        let wants_write = req.flags as i32 & (libc::O_WRONLY | libc::O_RDWR | libc::O_APPEND | libc::O_TRUNC) != 0;
         if wants_write && inodes.read_only {
             return (-libc::EROFS, 0);
         }
