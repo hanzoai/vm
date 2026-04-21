@@ -13,6 +13,6 @@ libc = "0.2"
 serde_json = "1"
 ureq = { version = "3", default-features = false, features = ["rustls"] }
 flate2 = "1"
-tar = "0.4"
+tar = "0.4.45"
 ignore = "0.4"
 notify = "7"
