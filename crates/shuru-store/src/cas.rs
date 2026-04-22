@@ -180,12 +180,13 @@ impl ChunkIndex {
         Ok(ChunkIndex { hashes, disk_size, parent_path, fallback_path })
     }
 
-    /// Validate that disk_size does not exceed the given backing store size.
+    /// Validate that the given backing store size does not exceed disk_size.
+    /// The virtual disk may be larger than the flat file (sparse expansion is valid).
     pub fn check_size_against_backend(&self, backend_size: u64, label: &str) -> Result<()> {
         anyhow::ensure!(
-            self.disk_size <= backend_size,
-            "index disk_size ({}) exceeds {} size ({})",
-            self.disk_size, label, backend_size,
+            backend_size <= self.disk_size,
+            "{} size ({}) exceeds index disk_size ({})",
+            label, backend_size, self.disk_size,
         );
         Ok(())
     }
@@ -515,12 +516,16 @@ mod tests {
 
     #[test]
     fn test_check_size_against_backend() {
-        let index = ChunkIndex::new(1024 * 1024); // 1MB
+        let index = ChunkIndex::new(4 * 1024 * 1024); // 4MB virtual disk
+
+        // flat file == virtual disk: ok
+        assert!(index.check_size_against_backend(4 * 1024 * 1024, "test").is_ok());
+        // flat file < virtual disk: ok (sparse expansion — the normal case)
         assert!(index.check_size_against_backend(1024 * 1024, "test").is_ok());
-        assert!(index.check_size_against_backend(2 * 1024 * 1024, "test").is_ok());
-        match index.check_size_against_backend(512 * 1024, "test") {
+        // flat file > virtual disk: corrupt — must fail
+        match index.check_size_against_backend(8 * 1024 * 1024, "test") {
             Err(e) => assert!(e.to_string().contains("exceeds")),
-            Ok(_) => panic!("expected size check to fail"),
+            Ok(_) => panic!("expected size check to fail when flat file exceeds virtual disk"),
         }
     }
 }
