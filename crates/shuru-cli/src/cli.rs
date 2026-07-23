@@ -1,3 +1,5 @@
+use std::net::Ipv4Addr;
+
 use clap::Parser;
 
 #[derive(clap::Args)]
@@ -29,6 +31,10 @@ pub(crate) struct VmArgs {
     /// Allow network access
     #[arg(long)]
     pub allow_net: bool,
+
+    /// IPv4 DNS resolver to use for guest queries (default: 8.8.8.8)
+    #[arg(long, value_name = "IP")]
+    pub dns_resolver: Option<Ipv4Addr>,
 
     /// Allow mounts to write to host filesystem (required for :rw mounts)
     #[arg(long)]

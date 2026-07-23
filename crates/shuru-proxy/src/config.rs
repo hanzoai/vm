@@ -11,8 +11,10 @@ pub struct ExposeHostMapping {
 }
 
 /// Configuration for the proxy engine.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct ProxyConfig {
+    /// IPv4 DNS server used for upstream queries.
+    pub dns_resolver: Ipv4Addr,
     /// Secrets to inject. Key is the env var name visible to the guest.
     /// The guest gets a random placeholder token; the proxy substitutes
     /// the real value only when the request targets an allowed host.
@@ -21,6 +23,17 @@ pub struct ProxyConfig {
     pub network: NetworkConfig,
     /// Host ports exposed to the guest via host.shuru.internal.
     pub expose_host: Vec<ExposeHostMapping>,
+}
+
+impl Default for ProxyConfig {
+    fn default() -> Self {
+        Self {
+            dns_resolver: Ipv4Addr::new(8, 8, 8, 8),
+            secrets: HashMap::new(),
+            network: NetworkConfig::default(),
+            expose_host: Vec::new(),
+        }
+    }
 }
 
 /// A secret that the proxy injects into HTTP requests.
@@ -182,5 +195,13 @@ mod tests {
             allow: vec!["api.example.com".into()],
         };
         assert!(with_entries.has_allowlist());
+    }
+
+    #[test]
+    fn default_dns_resolver_is_google_public_dns() {
+        assert_eq!(
+            ProxyConfig::default().dns_resolver,
+            Ipv4Addr::new(8, 8, 8, 8)
+        );
     }
 }
