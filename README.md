@@ -44,6 +44,9 @@ shuru run --allow-net
 # Restrict to specific hosts
 shuru run --allow-net --allow-host api.openai.com --allow-host registry.npmjs.org
 
+# Use a specific DNS resolver
+shuru run --allow-net --dns-resolver 1.1.1.1 -- curl https://example.com
+
 # Custom resources
 shuru run --cpus 4 --memory 4096 --disk-size 8192 -- make -j4
 ```

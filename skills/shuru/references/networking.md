@@ -2,6 +2,9 @@
 
 Networking is **off by default**. Pass `--allow-net` to enable it.
 
+Use `--dns-resolver IP` to select the IPv4 DNS server used for upstream guest
+queries. The default is `8.8.8.8`.
+
 ## How It Works
 
 All guest network traffic goes through a userspace proxy on the host (no NAT, no direct internet access). The proxy:
@@ -18,6 +21,9 @@ ICMP (ping) is not supported — only TCP traffic is proxied.
 ```bash
 shuru run --allow-net -- sh -c 'apt-get install -y curl && curl https://example.com'
 ```
+
+For environments that require a specific DNS server, select it with
+`--dns-resolver`, for example `shuru run --allow-net --dns-resolver 10.0.0.53`.
 
 Or set it in `shuru.json`:
 

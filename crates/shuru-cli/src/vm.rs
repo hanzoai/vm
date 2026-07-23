@@ -70,6 +70,10 @@ pub(crate) fn prepare_vm(
     let proxy_config = if allow_net {
         let mut proxy = cfg.to_proxy_config();
 
+        if let Some(resolver) = vm.dns_resolver {
+            proxy.dns_resolver = resolver;
+        }
+
         // Merge --secret flags: NAME=ENV_VAR@host1,host2
         for s in &vm.secret {
             let (name, from, hosts) = parse_secret_flag(s)
