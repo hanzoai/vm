@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::io::BufReader;
+use std::io::{BufReader, Read, Write};
 use std::net::TcpStream;
 use std::sync::Arc;
 
@@ -15,6 +15,43 @@ pub use shuru_vm::{default_data_dir, MountConfig};
 // ---------------------------------------------------------------------------
 // Public types
 // ---------------------------------------------------------------------------
+
+/// A raw bidirectional byte stream to a TCP port inside the guest,
+/// established via [`AsyncSandbox::dial_guest`].
+///
+/// Implements blocking [`Read`]/[`Write`] over the host-side (vsock-backed)
+/// connection. For async use, take the inner stream with
+/// [`GuestStream::into_inner`], set it non-blocking, and wrap it with
+/// `tokio::net::TcpStream::from_std`.
+pub struct GuestStream(TcpStream);
+
+impl GuestStream {
+    /// Consume the wrapper and return the underlying host-side stream.
+    pub fn into_inner(self) -> TcpStream {
+        self.0
+    }
+
+    /// Clone the stream. Both handles reference the same guest connection.
+    pub fn try_clone(&self) -> std::io::Result<Self> {
+        self.0.try_clone().map(GuestStream)
+    }
+}
+
+impl Read for GuestStream {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        self.0.read(buf)
+    }
+}
+
+impl Write for GuestStream {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        self.0.write(buf)
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        self.0.flush()
+    }
+}
 
 /// Storage backend for the VM's root disk.
 #[derive(Debug, Clone, Default)]
@@ -249,6 +286,10 @@ enum SandboxCmd {
         mapping: shuru_proto::PortMapping,
         reply: oneshot::Sender<Result<()>>,
     },
+    DialGuest {
+        port: u16,
+        reply: oneshot::Sender<Result<TcpStream>>,
+    },
     Checkpoint {
         name: String,
         reply: oneshot::Sender<Result<()>>,
@@ -455,6 +496,30 @@ impl AsyncSandbox {
             })
             .map_err(|_| anyhow::anyhow!("VM thread exited"))?;
         reply_rx.await?
+    }
+
+    /// Open a raw byte stream to a TCP port listening inside the guest.
+    ///
+    /// This is the ingress counterpart to outbound proxying: it lets host-side
+    /// code reach a server running in the sandbox without binding a local
+    /// listener (unlike [`add_port_forward`](Self::add_port_forward)). The
+    /// returned [`GuestStream`] is a blocking bidirectional pipe to
+    /// `127.0.0.1:<port>` inside the guest, suitable for bridging the guest
+    /// service onto any transport (for example, a tunnel to the public
+    /// internet). It works whether or not `--allow-net` is enabled.
+    ///
+    /// For async I/O, take the inner stream with [`GuestStream::into_inner`],
+    /// set it non-blocking, and wrap it with `tokio::net::TcpStream::from_std`.
+    pub async fn dial_guest(&self, port: u16) -> Result<GuestStream> {
+        let (reply_tx, reply_rx) = oneshot::channel();
+        self.cmd_tx
+            .send(SandboxCmd::DialGuest {
+                port,
+                reply: reply_tx,
+            })
+            .map_err(|_| anyhow::anyhow!("VM thread exited"))?;
+        let stream = reply_rx.await??;
+        Ok(GuestStream(stream))
     }
 
     /// Remove a file or directory inside the VM.
@@ -1017,6 +1082,13 @@ fn run_vm_loop(
                         let _ = reply.send(Err(e));
                     }
                 }
+            }
+            SandboxCmd::DialGuest { port, reply } => {
+                // Handshake blocks on the guest — run off the command loop.
+                let sb = sandbox.clone();
+                std::thread::spawn(move || {
+                    let _ = reply.send(sb.connect_forward(port));
+                });
             }
             SandboxCmd::Checkpoint { name, reply } => {
                 let result = (|| -> Result<()> {

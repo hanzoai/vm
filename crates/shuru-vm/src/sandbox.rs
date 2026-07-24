@@ -871,6 +871,18 @@ impl Sandbox {
         })
     }
 
+    /// Open a raw bidirectional stream to a TCP port listening inside the guest.
+    ///
+    /// Unlike [`start_port_forwarding`](Self::start_port_forwarding), this does
+    /// not bind a host listener. It completes the vsock forward handshake and
+    /// hands back the connected stream directly, so callers can bridge a guest
+    /// service to an arbitrary transport (e.g. a tunnel) without a local port.
+    /// The returned stream talks to `127.0.0.1:guest_port` inside the guest and
+    /// works whether or not networking (`--allow-net`) is enabled.
+    pub fn connect_forward(&self, guest_port: u16) -> Result<TcpStream> {
+        open_forward_stream(&self.vm, guest_port)
+    }
+
     fn connect_vsock(&self) -> Result<TcpStream> {
         let state_rx = self.vm.state_channel();
         for attempt in 1..=50 {
@@ -929,6 +941,16 @@ fn handle_forward_connection(
     vm: &VirtualMachine,
     guest_port: u16,
 ) -> Result<()> {
+    let vsock_stream = open_forward_stream(vm, guest_port)?;
+    // Bidirectional relay between TCP and vsock
+    relay(tcp_stream, vsock_stream);
+    Ok(())
+}
+
+/// Open a vsock forward channel to a TCP port inside the guest and complete
+/// the forward handshake, returning the connected stream. The stream is a raw
+/// bidirectional pipe to `127.0.0.1:guest_port` inside the guest.
+fn open_forward_stream(vm: &VirtualMachine, guest_port: u16) -> Result<TcpStream> {
     let mut vsock_stream = vm
         .connect_to_vsock_port(VSOCK_PORT_FORWARD)
         .map_err(|e| anyhow::anyhow!("vsock connect for port forward: {}", e))?;
@@ -952,9 +974,7 @@ fn handle_forward_connection(
         );
     }
 
-    // Bidirectional relay between TCP and vsock
-    relay(tcp_stream, vsock_stream);
-    Ok(())
+    Ok(vsock_stream)
 }
 
 fn relay(a: TcpStream, b: TcpStream) {
