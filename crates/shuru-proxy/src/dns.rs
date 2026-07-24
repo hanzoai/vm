@@ -74,10 +74,11 @@ async fn resolve_query(
         return build_refused_response(query_bytes);
     }
 
-    // Resolve on the host by forwarding to system resolver
+    // Resolve on the host by forwarding to the configured upstream resolver.
     let response_bytes = tokio::task::spawn_blocking({
         let query = query_bytes.to_vec();
-        move || forward_to_system_resolver(&query)
+        let resolver = config.dns_resolver;
+        move || forward_to_system_resolver(&query, resolver)
     })
     .await??;
 
@@ -112,11 +113,15 @@ fn pin_resolved_ips(response: &[u8], allowed_ips: &AllowedIps) {
     }
 }
 
-/// Forward a raw DNS query to the system resolver and return the raw response.
-fn forward_to_system_resolver(query: &[u8]) -> anyhow::Result<Vec<u8>> {
+/// Forward a raw DNS query over UDP to the configured IPv4 resolver on port 53
+/// and return the raw response. This does not consult the host resolver API.
+///
+/// The name is intentional: using the host's resolver configuration remains
+/// the desired long-term behavior for this operation.
+fn forward_to_system_resolver(query: &[u8], resolver: Ipv4Addr) -> anyhow::Result<Vec<u8>> {
     let sock = UdpSocket::bind("0.0.0.0:0")?;
     sock.set_read_timeout(Some(std::time::Duration::from_secs(5)))?;
-    sock.send_to(query, "8.8.8.8:53")?;
+    sock.send_to(query, (resolver, 53))?;
     let mut buf = [0u8; 4096];
     let n = sock.recv(&mut buf)?;
     Ok(buf[..n].to_vec())
