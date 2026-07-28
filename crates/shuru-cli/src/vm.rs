@@ -38,6 +38,20 @@ use crate::assets;
 use crate::cli::VmArgs;
 use crate::config::ShuruConfig;
 
+fn trace_boot(label: &str) {
+    use std::sync::OnceLock;
+    use std::time::Instant;
+    static T0: OnceLock<Instant> = OnceLock::new();
+    let t0 = *T0.get_or_init(Instant::now);
+    if std::env::var("SHURU_BOOT_TRACE").is_ok() {
+        eprintln!(
+            "shuru-trace: {:>7.1}ms {}",
+            t0.elapsed().as_secs_f64() * 1000.0,
+            label
+        );
+    }
+}
+
 pub(crate) struct PreparedVm {
     pub instance_dir: String,
     pub source_rootfs: String,
@@ -50,6 +64,10 @@ pub(crate) struct PreparedVm {
     pub memory: u64,
     pub disk_size: u64,
     pub proxy_config: Option<shuru_proxy::config::ProxyConfig>,
+    /// Flush guest page cache to disk before stopping. Set for checkpoint
+    /// creation, where the disk is cloned after the hard stop and unsynced
+    /// writes would silently vanish from the saved image.
+    pub sync_before_stop: bool,
     pub verbose: bool,
     pub forwards: Vec<PortMapping>,
     pub mounts: Vec<MountConfig>,
@@ -60,6 +78,7 @@ pub(crate) fn prepare_vm(
     cfg: &ShuruConfig,
     from: Option<&str>,
 ) -> Result<PreparedVm> {
+    trace_boot("prepare_vm start");
     let cpus = vm.cpus.or(cfg.cpus).unwrap_or(2);
     let memory = vm.memory.or(cfg.memory).unwrap_or(2048);
     let disk_size = vm.disk_size.or(cfg.disk_size).unwrap_or(4096);
@@ -194,11 +213,13 @@ pub(crate) fn prepare_vm(
         }
     };
 
+    trace_boot("prepare: config + assets checked");
     // Create per-instance working copy (clean any stale dir from PID reuse)
     let instance_dir = format!("{}/instances/{}", data_dir, std::process::id());
     let _ = std::fs::remove_dir_all(&instance_dir);
     std::fs::create_dir_all(&instance_dir)?;
     let work_rootfs = format!("{}/rootfs.ext4", instance_dir);
+    trace_boot("prepare: instance dir ready");
 
     // CAS checkpoints don't need a file copy — the NBD server reads from the chunk store.
     // We still need a rootfs file for the VM builder (kernel cmdline root=), but it can be
@@ -212,6 +233,7 @@ pub(crate) fn prepare_vm(
         // Create a minimal placeholder so the VM builder doesn't fail
         std::fs::File::create(&work_rootfs)?;
     }
+    trace_boot("prepare: rootfs cloned");
 
     // Extend to requested disk size
     let f = std::fs::OpenOptions::new()
@@ -241,6 +263,7 @@ pub(crate) fn prepare_vm(
         None
     };
 
+    trace_boot("prepare_vm done (disk cloned + extended)");
     Ok(PreparedVm {
         instance_dir,
         source_rootfs: source,
@@ -252,6 +275,7 @@ pub(crate) fn prepare_vm(
         memory,
         disk_size,
         proxy_config,
+        sync_before_stop: false,
         verbose,
         forwards,
         mounts,
@@ -291,9 +315,14 @@ pub(crate) fn build_sandbox(
     builder.build()
 }
 
-/// Start the CAS NBD server for a prepared VM, respecting SHURU_STORAGE=direct fallback.
+/// Start the CAS NBD server for a prepared VM. Direct disk mode is the
+/// default; CAS is opt-in via SHURU_STORAGE=cas. Booting from a CAS
+/// checkpoint always uses NBD since the chunk store is the only place its
+/// content exists.
 pub(crate) fn start_nbd(prepared: &PreparedVm) -> Result<Option<shuru_store::NbdHandle>> {
-    if std::env::var("SHURU_STORAGE").unwrap_or_default() == "direct" {
+    let storage = std::env::var("SHURU_STORAGE").unwrap_or_default();
+    let want_cas = storage == "cas" || storage == "nbd";
+    if prepared.cas_index.is_none() && !want_cas {
         return Ok(None);
     }
     let socket_path = format!("{}/nbd.sock", prepared.instance_dir);
@@ -346,15 +375,22 @@ pub(crate) fn run_command(prepared: &PreparedVm, command: &[String]) -> Result<R
 
     let nbd_handle = start_nbd(prepared)?;
     let nbd_uri = nbd_handle.as_ref().map(|h| h.uri());
+    trace_boot("proxy + storage ready");
 
     let sandbox = build_sandbox(prepared, false, vm_fd, nbd_uri.as_deref())?;
     if prepared.verbose {
         eprintln!("shuru: VM created and validated successfully");
     }
+    trace_boot("sandbox built + validated");
 
     sandbox.start()?;
     if prepared.verbose {
         eprintln!("shuru: VM started, waiting for guest...");
+    }
+    trace_boot("vm running");
+    if std::env::var("SHURU_BOOT_TRACE").is_ok() {
+        let _ = sandbox.wait_ready();
+        trace_boot("guest vsock ready");
     }
 
     let _fwd = if !prepared.forwards.is_empty() {
@@ -390,6 +426,11 @@ pub(crate) fn run_command(prepared: &PreparedVm, command: &[String]) -> Result<R
     } else {
         sandbox.exec_with_env(command, &env, &mut std::io::stdout(), &mut std::io::stderr())?
     };
+    trace_boot("command done");
+
+    if prepared.sync_before_stop {
+        let _ = sandbox.exec(&["sync"], &mut std::io::sink(), &mut std::io::sink());
+    }
 
     drop(proxy_handle);
     let _ = sandbox.stop();

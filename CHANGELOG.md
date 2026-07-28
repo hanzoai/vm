@@ -1,5 +1,50 @@
 # Changelog
 
+## 0.6.5
+
+### Direct disk mode is now the default
+
+Plain `shuru run` boots in about 0.45s warm, down from about 2s. The root
+disk is an APFS clonefile of the base image attached directly, instead of
+going through the CAS NBD server. The CAS path is opt-in via
+`SHURU_STORAGE=cas`, and booting `--from` a CAS (`.idx`) checkpoint always
+uses NBD automatically since the chunk store is the only place its content
+exists. This also fixes a bug where `SHURU_STORAGE=direct` combined with a
+`.idx` checkpoint booted an empty placeholder disk.
+
+Consequence: `shuru checkpoint create` now produces `.ext4` clonefile
+checkpoints by default; set `SHURU_STORAGE=cas` to produce `.idx` chunk
+store checkpoints. Both formats boot with `--from` and no env var.
+
+### Fix: checkpoint data loss on late guest writes
+
+`checkpoint create` stopped the VM without flushing the guest page cache,
+so writes made shortly before the stop could silently vanish from the saved
+checkpoint, and journaled images replayed journal recovery plus orphan
+inode cleanup on every boot from the checkpoint. The guest now runs `sync`
+before the VM is stopped.
+
+### Boot path
+
+- vsock readiness poll tightened from 200ms to 10ms granularity (same 10s
+  total timeout), removing up to 190ms of detection slack per boot
+- unused virtio memory balloon device removed from the VM configuration
+- kernel cmdline gains `init=/usr/bin/shuru-init`, so booting without an
+  initramfs lands on the correct init
+- `SHURU_BOOT_TRACE=1` prints per-stage boot timings for the host side
+
+### Guest (`shuru-guest` 0.3.6)
+
+- boot stage logs now carry monotonic timestamps
+- PID 1 stdio is hardened: a missing or broken console can no longer make
+  init writes fail
+
+### Crates
+
+- `shuru-vm` 0.3.8: builder no longer configures a balloon device; adds
+  `Sandbox::wait_ready()`
+- `shuru-sdk` 0.3.8: dependency bump
+
 ## 0.6.1
 
 ### Linux backend: correct wall clock and working directory mounts

@@ -142,9 +142,9 @@ impl VmConfigBuilder {
         }
 
         let cmdline = if self.verbose {
-            "console=hvc0 root=/dev/vda rw"
+            "console=hvc0 root=/dev/vda rw init=/usr/bin/shuru-init"
         } else {
-            "console=hvc0 root=/dev/vda rw quiet"
+            "console=hvc0 root=/dev/vda rw init=/usr/bin/shuru-init quiet"
         };
         boot_loader.set_command_line(cmdline);
 
@@ -215,7 +215,6 @@ impl VmConfigBuilder {
         config.set_socket_devices(&[socket_device]);
 
         config.set_entropy_devices(&[VirtioEntropyDevice::new()]);
-        config.set_memory_balloon_devices(&[VirtioMemoryBalloonDevice::new()]);
 
         config
             .validate()
@@ -250,6 +249,13 @@ impl Sandbox {
         self.vm
             .stop()
             .map_err(|e| anyhow::anyhow!("Failed to stop VM: {}", e))
+    }
+
+    /// Block until the guest control server accepts vsock connections.
+    pub fn wait_ready(&self) -> Result<()> {
+        let stream = self.connect_vsock()?;
+        drop(stream);
+        Ok(())
     }
 
     pub fn state_channel(&self) -> Receiver<VmState> {
@@ -885,7 +891,7 @@ impl Sandbox {
 
     fn connect_vsock(&self) -> Result<TcpStream> {
         let state_rx = self.vm.state_channel();
-        for attempt in 1..=50 {
+        for attempt in 1..=1000 {
             // Check if VM died (e.g. guest mount failure -> reboot POWER_OFF)
             if let Ok(state) = state_rx.try_recv() {
                 match state {
@@ -902,7 +908,7 @@ impl Sandbox {
                     return Ok(s);
                 }
                 Err(e) => {
-                    if attempt == 50 {
+                    if attempt == 1000 {
                         bail!(
                             "Failed to connect to guest after {} attempts: {}",
                             attempt,
@@ -910,7 +916,7 @@ impl Sandbox {
                         );
                     }
                     tracing::debug!("vsock connect attempt {} failed: {}", attempt, e);
-                    std::thread::sleep(Duration::from_millis(200));
+                    std::thread::sleep(Duration::from_millis(10));
                 }
             }
         }

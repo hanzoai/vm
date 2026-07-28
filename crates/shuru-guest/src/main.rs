@@ -15,6 +15,41 @@ mod guest {
     };
     use shuru_proto::{VSOCK_PORT, VSOCK_PORT_FORWARD};
 
+    fn uptime_ms() -> f64 {
+        let mut ts = libc::timespec {
+            tv_sec: 0,
+            tv_nsec: 0,
+        };
+        unsafe { libc::clock_gettime(libc::CLOCK_MONOTONIC, &mut ts) };
+        ts.tv_sec as f64 * 1000.0 + ts.tv_nsec as f64 / 1e6
+    }
+
+    /// Boot stage log with a monotonic timestamp. Uses a raw write so a
+    /// missing or broken console can never panic PID 1.
+    fn stage(msg: &str) {
+        let s = format!("shuru-guest[{:7.1}ms]: {}\n", uptime_ms(), msg);
+        unsafe { libc::write(2, s.as_ptr() as *const libc::c_void, s.len()) };
+    }
+
+    /// Ensure fds 0-2 exist so stdio writes never hit EBADF. When the VM has
+    /// no console device the kernel starts PID 1 with no open fds.
+    fn ensure_stdio() {
+        unsafe {
+            if libc::fcntl(2, libc::F_GETFD) >= 0 {
+                return;
+            }
+            let fd = libc::open(b"/dev/null\0".as_ptr() as *const libc::c_char, libc::O_RDWR);
+            if fd >= 0 {
+                for t in 0..3 {
+                    libc::dup2(fd, t);
+                }
+                if fd > 2 {
+                    libc::close(fd);
+                }
+            }
+        }
+    }
+
     fn mount_fs(source: &str, target: &str, fstype: &str, data: Option<&str>) -> bool {
         mount_fs_with_flags(source, target, fstype, 0, data)
     }
@@ -1584,7 +1619,8 @@ mod guest {
     }
 
     pub fn run() -> ! {
-        eprintln!("shuru-guest: starting as PID 1");
+        ensure_stdio();
+        stage("starting as PID 1");
 
         // Set PATH early so all child processes inherit it
         std::env::set_var(
@@ -1593,7 +1629,8 @@ mod guest {
         );
 
         mount_filesystems();
-        eprintln!("shuru-guest: filesystems mounted");
+        ensure_stdio();
+        stage("filesystems mounted");
 
         // Set hostname
         let hostname = b"shuru\0";
@@ -1602,7 +1639,7 @@ mod guest {
         }
 
         setup_networking();
-        eprintln!("shuru-guest: networking ready");
+        stage("networking ready");
 
         // Register signal handlers (PID 1 has no default signal dispositions)
         unsafe {
@@ -1621,13 +1658,13 @@ mod guest {
         }
 
         let listener_fd = create_vsock_listener(VSOCK_PORT);
-        eprintln!("shuru-guest: vsock listening on port {}", VSOCK_PORT);
+        stage(&format!("vsock listening on port {}", VSOCK_PORT));
 
         let fwd_listener_fd = create_vsock_listener(VSOCK_PORT_FORWARD);
-        eprintln!(
-            "shuru-guest: port forward listener on port {}",
+        stage(&format!(
+            "port forward listener on port {}",
             VSOCK_PORT_FORWARD
-        );
+        ));
         std::thread::spawn(move || {
             forward_accept_loop(fwd_listener_fd);
         });
