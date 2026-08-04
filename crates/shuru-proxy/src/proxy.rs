@@ -6,10 +6,11 @@ use boring::ssl::{SslConnector, SslMethod};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 use tokio::sync::mpsc;
-use tracing::{debug, info};
+use tracing::{debug, info, warn};
 
 use crate::config::ProxyConfig;
 use crate::dns;
+use crate::secrets::SecretResolver;
 use crate::stack::{ConnectionId, StackCommand, StackEvent, TcpConnection};
 use crate::stream::ChannelStream;
 use crate::tls::CertificateAuthority;
@@ -28,7 +29,7 @@ pub struct ProxyEngine {
     event_rx: mpsc::UnboundedReceiver<StackEvent>,
     cmd_tx: mpsc::UnboundedSender<StackCommand>,
     connections: HashMap<ConnectionId, mpsc::UnboundedSender<Vec<u8>>>,
-    placeholders: Arc<HashMap<String, String>>,
+    secrets: Arc<SecretResolver>,
     ca: Arc<tokio::sync::Mutex<CertificateAuthority>>,
     upstream_ssl: SslConnector,
     allowed_ips: AllowedIps,
@@ -49,12 +50,15 @@ impl ProxyEngine {
         builder.set_alpn_protos(b"\x08http/1.1").expect("ALPN");
         let upstream_ssl = builder.build();
 
+        let config = Arc::new(config);
+        let secrets = Arc::new(SecretResolver::new(config.clone(), placeholders));
+
         ProxyEngine {
-            config: Arc::new(config),
+            config,
             event_rx,
             cmd_tx,
             connections: HashMap::new(),
-            placeholders: Arc::new(placeholders),
+            secrets,
             ca: Arc::new(tokio::sync::Mutex::new(ca)),
             upstream_ssl,
             allowed_ips,
@@ -98,7 +102,7 @@ impl ProxyEngine {
         let cmd_tx = self.cmd_tx.clone();
         let config = self.config.clone();
         let ca = self.ca.clone();
-        let placeholders = self.placeholders.clone();
+        let secrets = self.secrets.clone();
         let upstream_ssl = self.upstream_ssl.clone();
         let allowed_ips = self.allowed_ips.clone();
 
@@ -110,7 +114,7 @@ impl ProxyEngine {
                 cmd_tx,
                 &config,
                 ca,
-                &placeholders,
+                &secrets,
                 upstream_ssl,
                 &allowed_ips,
             )
@@ -130,7 +134,7 @@ async fn handle_connection(
     cmd_tx: mpsc::UnboundedSender<StackCommand>,
     config: &ProxyConfig,
     ca: Arc<tokio::sync::Mutex<CertificateAuthority>>,
-    placeholders: &HashMap<String, String>,
+    secrets: &SecretResolver,
     upstream_ssl: SslConnector,
     allowed_ips: &AllowedIps,
 ) -> anyhow::Result<()> {
@@ -226,7 +230,18 @@ async fn handle_connection(
         }
 
         if let Some(domain) = sni {
-            let substitutions = config.secrets_for_domain(&domain, placeholders);
+            // Resolved per connection, so a rotated secret is picked up by the
+            // next connection to the domain without the guest noticing.
+            let substitutions = match secrets.substitutions_for_domain(&domain).await {
+                Ok(substitutions) => substitutions,
+                Err(e) => {
+                    // Warn rather than debug: the guest only sees a dropped
+                    // TLS connection, so this is the sole account of why.
+                    warn!("TLS to {domain} blocked: {e:#}");
+                    let _ = cmd_tx.send(StackCommand::Close { id });
+                    return Err(e.context(format!("TLS to {domain} blocked")));
+                }
+            };
             if !substitutions.is_empty() {
                 debug!("MITM: {domain}");
                 return handle_mitm(
