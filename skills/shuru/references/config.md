@@ -52,9 +52,9 @@ The guest sees `$API_KEY=shuru_tok_...`. The real secret never enters the VM.
 
 A secret can be minted by a command instead of read from the environment.
 The proxy runs the command, caches what it returns, and runs it again as the
-value approaches expiry. Use this for credentials that outlive neither the
-sandbox nor the task, such as GitHub App installation tokens, which expire
-after an hour.
+value approaches expiry. Use this for credentials that expire sooner than
+the task takes to finish, such as GitHub App installation tokens, which last
+an hour.
 
 ```json
 {
