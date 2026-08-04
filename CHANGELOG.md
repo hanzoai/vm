@@ -1,5 +1,42 @@
 # Changelog
 
+## Unreleased
+
+### Secrets can be refreshed while the VM runs
+
+A secret can now be backed by a command that mints it, instead of a host
+environment variable that is frozen when the VM boots:
+
+```json
+"secrets": {
+  "GITHUB_TOKEN": {
+    "command": ["./scripts/mint-installation-token.sh"],
+    "hosts": ["api.github.com", "github.com"]
+  }
+}
+```
+
+The command prints `{"version":1,"value":"...","expires_at":"..."}` and the
+proxy re-runs it as the value nears expiry, so credentials with short
+lifetimes (GitHub App installation tokens last an hour) no longer strand a
+long running task. The placeholder inside the guest never changes, so the
+rotation is invisible to the VM and the real value still never enters it.
+Set `ttl` for a command that cannot report an expiry of its own.
+
+Values are held in memory only, resolution is single flight so a burst of
+requests mints once, and a command that fails while a live value is cached
+keeps serving that value. A command that fails with nothing usable cached
+refuses the connection instead of sending a placeholder upstream.
+
+See docs/rfcs/0002-refreshable-secrets.md.
+
+Secrets are resolved per connection, so a connection held open across the
+expiry keeps its original value until it reconnects.
+
+shuru-proxy 0.3.0 and shuru-sdk 0.4.0 are breaking for direct consumers:
+`SecretConfig.from` is now `Option<String>`. Use `SecretConfig::from_env`
+or `SecretConfig::from_command`.
+
 ## 0.6.5
 
 ### Direct disk mode is now the default
