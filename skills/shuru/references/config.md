@@ -48,6 +48,13 @@ Secrets let the guest use API keys without exposing the real values. The guest r
 
 The guest sees `$API_KEY=shuru_tok_...`. The real secret never enters the VM.
 
+Substitution applies to the request head: the request line and any header
+value, whatever the header is named. A custom `X-My-Vendor-Token` works with
+no extra configuration, and a credential passed as a query parameter is
+covered too. Request bodies are forwarded untouched, so a placeholder placed
+in a body reaches the upstream unsubstituted and the request fails to
+authenticate.
+
 ### Refreshing short lived credentials
 
 A secret can be minted by a command instead of read from the environment.

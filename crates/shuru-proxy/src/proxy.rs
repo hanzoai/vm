@@ -13,8 +13,13 @@ use crate::dns;
 use crate::secrets::SecretResolver;
 use crate::stack::{ConnectionId, StackCommand, StackEvent, TcpConnection};
 use crate::stream::ChannelStream;
+use crate::substitute::RequestStream;
 use crate::tls::CertificateAuthority;
 use crate::AllowedIps;
+
+/// How often a live relay re-resolves its secrets, so a rotation reaches a
+/// long-lived connection without waiting for it to reconnect.
+const SECRET_REFRESH_INTERVAL: std::time::Duration = std::time::Duration::from_secs(5);
 
 /// The async proxy engine.
 ///
@@ -114,7 +119,7 @@ impl ProxyEngine {
                 cmd_tx,
                 &config,
                 ca,
-                &secrets,
+                secrets,
                 upstream_ssl,
                 &allowed_ips,
             )
@@ -134,7 +139,7 @@ async fn handle_connection(
     cmd_tx: mpsc::UnboundedSender<StackCommand>,
     config: &ProxyConfig,
     ca: Arc<tokio::sync::Mutex<CertificateAuthority>>,
-    secrets: &SecretResolver,
+    secrets: Arc<SecretResolver>,
     upstream_ssl: SslConnector,
     allowed_ips: &AllowedIps,
 ) -> anyhow::Result<()> {
@@ -252,6 +257,7 @@ async fn handle_connection(
                     data_rx,
                     cmd_tx,
                     ca,
+                    secrets,
                     substitutions,
                     upstream_ssl,
                 )
@@ -333,6 +339,7 @@ async fn handle_mitm(
     data_rx: mpsc::UnboundedReceiver<Vec<u8>>,
     cmd_tx: mpsc::UnboundedSender<StackCommand>,
     ca: Arc<tokio::sync::Mutex<CertificateAuthority>>,
+    secrets: Arc<SecretResolver>,
     substitutions: Vec<(String, String)>,
     upstream_ssl: SslConnector,
 ) -> anyhow::Result<()> {
@@ -359,15 +366,34 @@ async fn handle_mitm(
 
     let guest_to_upstream = async move {
         let mut buf = vec![0u8; 65536];
+        let mut requests = RequestStream::new(substitutions);
+        let mut last_refresh = std::time::Instant::now();
+
         loop {
             match guest_rd.read(&mut buf).await {
-                Ok(0) | Err(_) => break,
-                Ok(n) => {
-                    let mut data = buf[..n].to_vec();
-                    for (placeholder, real_value) in &substitutions {
-                        data = replace_bytes(&data, placeholder.as_bytes(), real_value.as_bytes());
+                Ok(0) | Err(_) => {
+                    // A head held here belongs to a request the guest
+                    // abandoned. Forward it rather than swallow it.
+                    let pending = requests.take_pending();
+                    if !pending.is_empty() {
+                        let _ = upstream_wr.write_all(&pending).await;
                     }
-                    if upstream_wr.write_all(&data).await.is_err() {
+                    break;
+                }
+                Ok(n) => {
+                    // Pick up a rotated secret without waiting for the guest
+                    // to open a new connection. Cheap while the cached value
+                    // is live; a re-mint costs this connection what it would
+                    // have cost at connection setup.
+                    if !requests.is_tunnel() && last_refresh.elapsed() >= SECRET_REFRESH_INTERVAL {
+                        if let Ok(fresh) = secrets.substitutions_for_domain(&domain).await {
+                            requests.update(fresh);
+                        }
+                        last_refresh = std::time::Instant::now();
+                    }
+
+                    let out = requests.push(&buf[..n]);
+                    if !out.is_empty() && upstream_wr.write_all(&out).await.is_err() {
                         break;
                     }
                 }
@@ -396,30 +422,6 @@ async fn handle_mitm(
 
     let _ = cmd_tx.send(StackCommand::Close { id });
     Ok(())
-}
-
-/// Replace all occurrences of `from` with `to` in a byte slice.
-fn replace_bytes(data: &[u8], from: &[u8], to: &[u8]) -> Vec<u8> {
-    if from.is_empty() || data.len() < from.len() {
-        return data.to_vec();
-    }
-
-    let mut result = Vec::with_capacity(data.len());
-    let mut i = 0;
-
-    while i <= data.len() - from.len() {
-        if &data[i..i + from.len()] == from {
-            result.extend_from_slice(to);
-            i += from.len();
-        } else {
-            result.push(data[i]);
-            i += 1;
-        }
-    }
-
-    // Append remaining bytes that can't contain the pattern
-    result.extend_from_slice(&data[i..]);
-    result
 }
 
 /// Extract SNI from a TLS ClientHello.
@@ -504,23 +506,5 @@ mod tests {
     fn test_extract_sni_none_for_non_tls() {
         assert_eq!(extract_sni(b"GET / HTTP/1.1\r\n"), None);
         assert_eq!(extract_sni(&[]), None);
-    }
-
-    #[test]
-    fn test_replace_bytes() {
-        assert_eq!(
-            replace_bytes(b"hello world", b"world", b"rust"),
-            b"hello rust"
-        );
-        assert_eq!(
-            replace_bytes(
-                b"key=shuru_tok_abc123&other=val",
-                b"shuru_tok_abc123",
-                b"real_secret"
-            ),
-            b"key=real_secret&other=val"
-        );
-        assert_eq!(replace_bytes(b"no match", b"xyz", b"abc"), b"no match");
-        assert_eq!(replace_bytes(b"", b"x", b"y"), b"");
     }
 }

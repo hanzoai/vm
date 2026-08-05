@@ -5,6 +5,7 @@ mod proxy;
 mod secrets;
 mod stack;
 mod stream;
+mod substitute;
 mod tls;
 
 pub use config::ProxyConfig;
