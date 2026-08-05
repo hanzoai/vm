@@ -87,7 +87,7 @@ pub(crate) fn prepare_vm(
     let verbose = vm.verbose;
 
     let proxy_config = if allow_net {
-        let mut proxy = cfg.to_proxy_config();
+        let mut proxy = cfg.to_proxy_config()?;
 
         if let Some(resolver) = vm.dns_resolver {
             proxy.dns_resolver = resolver;
@@ -99,7 +99,7 @@ pub(crate) fn prepare_vm(
                 .with_context(|| format!("invalid --secret: '{}' (expected NAME=ENV@host1,host2)", s))?;
             proxy.secrets.insert(
                 name,
-                shuru_proxy::config::SecretConfig { from, hosts, value: None },
+                shuru_proxy::config::SecretConfig::from_env(from, hosts),
             );
         }
 

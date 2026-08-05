@@ -2,8 +2,10 @@ pub mod config;
 mod device;
 mod dns;
 mod proxy;
+mod secrets;
 mod stack;
 mod stream;
+mod substitute;
 mod tls;
 
 pub use config::ProxyConfig;

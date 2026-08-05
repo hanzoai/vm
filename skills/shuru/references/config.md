@@ -48,6 +48,62 @@ Secrets let the guest use API keys without exposing the real values. The guest r
 
 The guest sees `$API_KEY=shuru_tok_...`. The real secret never enters the VM.
 
+Substitution applies to the request head: the request line and any header
+value, whatever the header is named. A custom `X-My-Vendor-Token` works with
+no extra configuration, and a credential passed as a query parameter is
+covered too. Request bodies are forwarded untouched, so a placeholder placed
+in a body reaches the upstream unsubstituted and the request fails to
+authenticate.
+
+### Refreshing short lived credentials
+
+A secret can be minted by a command instead of read from the environment.
+The proxy runs the command, caches what it returns, and runs it again as the
+value approaches expiry. Use this for credentials that expire sooner than
+the task takes to finish, such as GitHub App installation tokens, which last
+an hour.
+
+```json
+{
+  "allow_net": true,
+  "secrets": {
+    "GITHUB_TOKEN": {
+      "command": ["./scripts/mint-installation-token.sh"],
+      "hosts": ["api.github.com", "github.com"]
+    }
+  }
+}
+```
+
+- `command`: argv array, never passed to a shell. Runs with the working
+  directory set to the folder holding `shuru.json`, so relative paths work
+  wherever `shuru` is invoked from.
+- `ttl`: optional lifetime to assume when the command reports no expiry.
+  Accepts `"45m"`, `"3600s"`, `"2h"`, or a bare number of seconds.
+
+Set exactly one of `from` or `command` on a secret.
+
+The command writes one JSON object to stdout:
+
+```json
+{ "version": 1, "value": "ghs_...", "expires_at": "2026-08-04T18:36:00Z" }
+```
+
+- `version` must be `1`.
+- `value` is the credential.
+- `expires_at` is optional RFC3339. When present the proxy re-runs the
+  command about a minute before it expires. When absent, `ttl` applies. With
+  neither, the value is minted once and never refreshed.
+
+A non-zero exit, unparseable output, or a run longer than 10 seconds is a
+failure. If a previously minted value is still live the proxy keeps serving
+it and logs a warning; otherwise the connection is refused, rather than
+sending a placeholder upstream that would come back as a confusing auth
+error.
+
+The placeholder in the guest never changes when a value is refreshed, so
+rotation is invisible inside the VM. Minted values are held in memory only.
+
 ## Network Policy
 
 Restrict which domains the guest can reach:
