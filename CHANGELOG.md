@@ -30,8 +30,32 @@ refuses the connection instead of sending a placeholder upstream.
 
 See docs/rfcs/0002-refreshable-secrets.md.
 
-Secrets are resolved per connection, so a connection held open across the
-expiry keeps its original value until it reconnects.
+### Secrets are substituted in the request head
+
+Substitution used to be a blind byte replace over the whole stream, which had
+two consequences. A placeholder straddling two reads was forwarded
+unsubstituted, so the secret never got injected: reproduced on a large upload
+where 3 of 2000 placeholders leaked. And a secret in a request body broke the
+declared body length, hanging the request.
+
+Substitution now applies to the request line and any header value, whatever
+the header is named, so a custom `X-My-Vendor-Token` needs no configuration
+and a credential in a query parameter is covered. Bodies stream through
+untouched, so no declared length is ever invalidated. HTTP framing is read
+but never rewritten, only to find where the next request begins on a reused
+connection, and anything ambiguous falls back to a plain byte tunnel.
+
+This is also less work than before, since only heads are scanned rather than
+every byte of every body.
+
+Behaviour change: a placeholder in a request body is no longer substituted.
+That never worked for any real credential length, since placeholders are a
+fixed 30 bytes and a differing length broke framing, but the failure moves
+from a hung request to a clean 401.
+
+A live connection also re-resolves its secrets every 5 seconds, so a rotation
+reaches a connection that is already open instead of waiting for it to
+reconnect.
 
 shuru-proxy 0.3.0 and shuru-sdk 0.4.0 are breaking for direct consumers:
 `SecretConfig.from` is now `Option<String>`. Use `SecretConfig::from_env`

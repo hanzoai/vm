@@ -1552,6 +1552,7 @@ version = "0.3.0"
 dependencies = [
  "anyhow",
  "boring",
+ "httparse",
  "libc",
  "lru",
  "rcgen",
