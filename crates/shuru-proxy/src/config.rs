@@ -1,5 +1,7 @@
 use std::collections::HashMap;
 use std::net::Ipv4Addr;
+use std::path::PathBuf;
+use std::time::Duration;
 
 /// A host port exposed to the guest via host.shuru.internal.
 #[derive(Debug, Clone)]
@@ -23,6 +25,10 @@ pub struct ProxyConfig {
     pub network: NetworkConfig,
     /// Host ports exposed to the guest via host.shuru.internal.
     pub expose_host: Vec<ExposeHostMapping>,
+    /// Working directory for secret provider commands. Normally the directory
+    /// holding the resolved shuru.json, so relative paths in a config behave
+    /// the same wherever shuru is invoked from. None inherits the process cwd.
+    pub config_dir: Option<PathBuf>,
 }
 
 impl Default for ProxyConfig {
@@ -32,20 +38,56 @@ impl Default for ProxyConfig {
             secrets: HashMap::new(),
             network: NetworkConfig::default(),
             expose_host: Vec::new(),
+            config_dir: None,
         }
     }
 }
 
 /// A secret that the proxy injects into HTTP requests.
-#[derive(Debug, Clone)]
+///
+/// The value comes from exactly one source: a host environment variable
+/// (`from`), a command that mints it (`command`), or a literal (`value`).
+#[derive(Debug, Clone, Default)]
 pub struct SecretConfig {
     /// Host environment variable to read the real value from.
-    pub from: String,
+    pub from: Option<String>,
+    /// Command to run to mint the value, as argv. Never passed to a shell.
+    /// Re-run once the minted value approaches its expiry.
+    pub command: Option<Vec<String>>,
+    /// Lifetime to assume when a command reports no expiry of its own.
+    pub ttl: Option<Duration>,
     /// Domain patterns where this secret may be sent (e.g., "api.openai.com").
     /// The proxy only substitutes the placeholder on requests to these hosts.
     pub hosts: Vec<String>,
     /// If set, use this value directly instead of reading from the host env var.
     pub value: Option<String>,
+}
+
+impl SecretConfig {
+    /// Secret backed by a host environment variable.
+    pub fn from_env(var: impl Into<String>, hosts: Vec<String>) -> Self {
+        Self {
+            from: Some(var.into()),
+            hosts,
+            ..Default::default()
+        }
+    }
+
+    /// Secret minted by running a command.
+    pub fn from_command(command: Vec<String>, hosts: Vec<String>) -> Self {
+        Self {
+            command: Some(command),
+            hosts,
+            ..Default::default()
+        }
+    }
+
+    /// True if this secret is bound to `domain`.
+    pub fn matches_domain(&self, domain: &str) -> bool {
+        self.hosts
+            .iter()
+            .any(|pattern| domain_matches(pattern, domain))
+    }
 }
 
 /// Network access policy.
@@ -88,40 +130,13 @@ impl ProxyConfig {
             .find(|m| m.guest_port == guest_port)
             .map(|m| m.host_port)
     }
-
-    /// Get all secret placeholder→real value mappings for a given domain.
-    pub fn secrets_for_domain(
-        &self,
-        domain: &str,
-        placeholders: &HashMap<String, String>,
-    ) -> Vec<(String, String)> {
-        let mut substitutions = Vec::new();
-        for (name, secret) in &self.secrets {
-            if secret
-                .hosts
-                .iter()
-                .any(|pattern| domain_matches(pattern, domain))
-            {
-                if let Some(placeholder) = placeholders.get(name) {
-                    let real_value = secret
-                        .value
-                        .clone()
-                        .or_else(|| std::env::var(&secret.from).ok());
-                    if let Some(real_value) = real_value {
-                        substitutions.push((placeholder.clone(), real_value));
-                    }
-                }
-            }
-        }
-        substitutions
-    }
 }
 
 /// Simple wildcard domain matching.
 /// "*" matches any domain (catch-all).
 /// "*.example.com" matches "api.example.com" but not "example.com".
 /// "example.com" matches exactly "example.com".
-fn domain_matches(pattern: &str, domain: &str) -> bool {
+pub(crate) fn domain_matches(pattern: &str, domain: &str) -> bool {
     if pattern == "*" {
         true
     } else if let Some(suffix) = pattern.strip_prefix("*.") {
