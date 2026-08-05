@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.7.0
 
 ### Secrets can be refreshed while the VM runs
 
@@ -57,9 +57,13 @@ A live connection also re-resolves its secrets every 5 seconds, so a rotation
 reaches a connection that is already open instead of waiting for it to
 reconnect.
 
-shuru-proxy 0.3.0 and shuru-sdk 0.4.0 are breaking for direct consumers:
-`SecretConfig.from` is now `Option<String>`. Use `SecretConfig::from_env`
-or `SecretConfig::from_command`.
+### Crates
+
+- `shuru-proxy` 0.3.0: breaking. `SecretConfig.from` is now
+  `Option<String>`, with `SecretConfig::from_env` and
+  `SecretConfig::from_command` as the constructors. Adds `command`, `ttl`
+  and `config_dir`.
+- `shuru-sdk` 0.4.0: breaking by re-export of the above.
 
 ## 0.6.5
 
