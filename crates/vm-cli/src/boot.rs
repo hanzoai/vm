@@ -33,7 +33,7 @@ use crate::assets;
 use crate::cli::VmArgs;
 use crate::config::Config;
 
-fn trace_boot(label: &str) {
+pub(crate) fn trace_boot(label: &str) {
     use std::sync::OnceLock;
     use std::time::Instant;
     static T0: OnceLock<Instant> = OnceLock::new();
@@ -63,6 +63,11 @@ pub(crate) struct PreparedVm {
     /// creation, where the disk is cloned after the hard stop and unsynced
     /// writes would silently vanish from the saved image.
     pub sync_before_stop: bool,
+    /// The work rootfs is thrown away when the VM stops: attach it without
+    /// host durability and unlink it while the VM holds it open, so teardown
+    /// deletes nothing. Set only by plain `run` — never for checkpoint
+    /// creation or stdio mode, which read the disk back after the VM stops.
+    pub discard_disk: bool,
     pub verbose: bool,
     pub forwards: Vec<PortMapping>,
     pub mounts: Vec<MountConfig>,
@@ -161,10 +166,18 @@ pub(crate) fn prepare_vm(vm: &VmArgs, cfg: &Config, from: Option<&str>) -> Resul
         .rootfs
         .clone()
         .unwrap_or_else(|| format!("{}/rootfs.ext4", data_dir));
-    let initrd_path_str = vm
-        .initrd
-        .clone()
-        .unwrap_or_else(|| format!("{}/initramfs.cpio.gz", data_dir));
+    // Direct boot is the default: the kernel mounts /dev/vda and starts
+    // /usr/bin/vm-guest itself. An initramfs is only used when explicitly
+    // requested (--initrd / HANZO_VM_INITRD), kept as a fallback path.
+    let initrd_path = match vm.initrd.clone() {
+        Some(p) => {
+            if !std::path::Path::new(&p).exists() {
+                bail!("initramfs not found at {}", p);
+            }
+            Some(p)
+        }
+        None => None,
+    };
 
     if !std::path::Path::new(&kernel_path).exists() {
         bail!(
@@ -218,6 +231,17 @@ pub(crate) fn prepare_vm(vm: &VmArgs, cfg: &Config, from: Option<&str>) -> Resul
             eprintln!("hanzo-vm: creating working copy...");
         }
         clone_file(&source, &work_rootfs)?;
+        // The clone is a fresh vnode: its pages are cold even when the source
+        // is cached, and the guest's root mount pays for that in disk reads.
+        // Warm it sequentially while the VM is being configured and started.
+        let warm_path = work_rootfs.clone();
+        std::thread::spawn(move || {
+            if let Ok(f) = std::fs::File::open(&warm_path) {
+                let mut reader = std::io::BufReader::with_capacity(1 << 20, f);
+                let mut sink = std::io::sink();
+                let _ = std::io::copy(&mut reader, &mut sink);
+            }
+        });
     } else {
         // Create a minimal placeholder so the VM builder doesn't fail
         std::fs::File::create(&work_rootfs)?;
@@ -240,16 +264,6 @@ pub(crate) fn prepare_vm(vm: &VmArgs, cfg: &Config, from: Option<&str>) -> Resul
     }
     drop(f);
 
-    let initrd_path = if std::path::Path::new(&initrd_path_str).exists() {
-        Some(initrd_path_str)
-    } else {
-        eprintln!(
-            "hanzo-vm: warning: initramfs not found at {}, booting without it",
-            initrd_path_str
-        );
-        None
-    };
-
     trace_boot("prepare_vm done (disk cloned + extended)");
     Ok(PreparedVm {
         instance_dir,
@@ -263,6 +277,7 @@ pub(crate) fn prepare_vm(vm: &VmArgs, cfg: &Config, from: Option<&str>) -> Resul
         disk_size,
         proxy_config,
         sync_before_stop: false,
+        discard_disk: false,
         verbose,
         forwards,
         mounts,
@@ -281,7 +296,8 @@ pub(crate) fn build_sandbox(
         .cpus(prepared.cpus)
         .memory_mb(prepared.memory)
         .console(console)
-        .verbose(prepared.verbose);
+        .verbose(prepared.verbose)
+        .sync_disk(!prepared.discard_disk);
 
     if let Some(fd) = network_fd {
         builder = builder.network_fd(fd);
@@ -374,6 +390,11 @@ pub(crate) fn run_command(prepared: &PreparedVm, command: &[String]) -> Result<R
     if prepared.verbose {
         eprintln!("hanzo-vm: VM started, waiting for guest...");
     }
+    // VZ holds the disk open; unlinking now means teardown deletes nothing
+    // and the space is reclaimed by the kernel after the process exits.
+    if prepared.discard_disk {
+        let _ = std::fs::remove_file(&prepared.work_rootfs);
+    }
     trace_boot("vm running");
     if std::env::var("HANZO_VM_BOOT_TRACE").is_ok() {
         let _ = sandbox.wait_ready();
@@ -426,6 +447,7 @@ pub(crate) fn run_command(prepared: &PreparedVm, command: &[String]) -> Result<R
 
     drop(proxy_handle);
     let _ = sandbox.stop();
+    trace_boot("vm stopped");
     Ok(RunResult {
         exit_code,
         nbd_handle,

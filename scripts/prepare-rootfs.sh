@@ -14,7 +14,10 @@ DATA_DIR="${HANZO_VM_HOME:-$HOME/.hanzo/vm}"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_DIR="$(dirname "$SCRIPT_DIR")"
 GUEST_BINARY="${REPO_DIR}/target/aarch64-unknown-linux-musl/release/vm-guest"
-ROOTFS_SIZE_MB=1024
+# Matches the CLI's default --disk-size so the per-run clone is never
+# extended (extending an APFS clone costs ~0.5s at truncate and ~0.7s at
+# delete). The image is sparse; unwritten space costs nothing on disk.
+ROOTFS_SIZE_MB=4096
 
 if [ ! -f "$GUEST_BINARY" ]; then
     echo "ERROR: guest binary not found at ${GUEST_BINARY}"

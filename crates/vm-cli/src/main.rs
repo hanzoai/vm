@@ -44,7 +44,8 @@ fn main() -> Result<()> {
                 vec!["/bin/sh".to_string()]
             };
 
-            let prepared = boot::prepare_vm(&vm, &cfg, from.as_deref())?;
+            let mut prepared = boot::prepare_vm(&vm, &cfg, from.as_deref())?;
+            prepared.discard_disk = !stdio && !console;
 
             let result = if stdio {
                 stdio::run_stdio(&prepared)
@@ -55,6 +56,7 @@ fn main() -> Result<()> {
             };
 
             let _ = std::fs::remove_dir_all(&prepared.instance_dir);
+            boot::trace_boot("instance dir removed");
             process::exit(result?);
         }
         Commands::Init { force } => {
