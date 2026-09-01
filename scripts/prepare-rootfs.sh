@@ -13,15 +13,22 @@ DEBIAN_RELEASE="trixie"
 DATA_DIR="${HANZO_VM_HOME:-$HOME/.hanzo/vm}"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_DIR="$(dirname "$SCRIPT_DIR")"
-GUEST_BINARY="${REPO_DIR}/target/aarch64-unknown-linux-musl/release/vm-guest"
 # Matches the CLI's default --disk-size so the per-run clone is never
 # extended (extending an APFS clone costs ~0.5s at truncate and ~0.7s at
 # delete). The image is sparse; unwritten space costs nothing on disk.
 ROOTFS_SIZE_MB=4096
 
+# The guest image is built for the host architecture (macOS builds arm64
+# in a container below).
+case "$(uname -m)" in
+    x86_64) GUEST_TARGET="x86_64-unknown-linux-musl"; DEB_ARCH="amd64" ;;
+    *)      GUEST_TARGET="aarch64-unknown-linux-musl"; DEB_ARCH="arm64" ;;
+esac
+GUEST_BINARY="${REPO_DIR}/target/${GUEST_TARGET}/release/vm-guest"
+
 if [ ! -f "$GUEST_BINARY" ]; then
     echo "ERROR: guest binary not found at ${GUEST_BINARY}"
-    echo "       Run: cargo build -p vm-guest --target aarch64-unknown-linux-musl --release"
+    echo "       Run: cargo build -p vm-guest --target ${GUEST_TARGET} --release"
     exit 1
 fi
 
@@ -32,11 +39,6 @@ if [ "$(uname)" = "Darwin" ]; then
     exec docker run --rm --platform linux/arm64/v8 \
         -v "${REPO_DIR}:/src:ro" -v "${DATA_DIR}:/out" -e HANZO_VM_HOME=/out \
         "debian:${DEBIAN_RELEASE}-slim" /src/scripts/prepare-rootfs.sh
-fi
-
-if [ "$(uname -m)" != "aarch64" ]; then
-    echo "ERROR: the guest is aarch64; build on an arm64 Linux host"
-    exit 1
 fi
 
 SUDO=""
@@ -99,7 +101,7 @@ if [ -f "${DATA_DIR}/rootfs.ext4" ]; then
 else
     echo "==> Building Debian ${DEBIAN_RELEASE} rootfs (${ROOTFS_SIZE_MB}MB)..."
     ROOT="${WORK}/rootfs"
-    $SUDO debootstrap --arch=arm64 --variant=minbase "$DEBIAN_RELEASE" "$ROOT" http://deb.debian.org/debian
+    $SUDO debootstrap --arch="$DEB_ARCH" --variant=minbase "$DEBIAN_RELEASE" "$ROOT" http://deb.debian.org/debian
 
     $SUDO mkdir -p "${ROOT}/etc/dpkg/dpkg.cfg.d"
     cat <<'DPKG' | $SUDO tee "${ROOT}/etc/dpkg/dpkg.cfg.d/01-nodoc" > /dev/null

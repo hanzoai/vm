@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+#[cfg(target_os = "macos")]
 use std::ffi::CString;
 use std::io::IsTerminal;
 
