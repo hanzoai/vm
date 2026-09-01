@@ -22,10 +22,12 @@ case "$OS" in
         case "$ARCH" in
             aarch64|arm64)
                 PLATFORM="linux-aarch64"
-                echo "Warning: Linux support is experimental and not ready for production use yet." >&2
+                ;;
+            x86_64)
+                PLATFORM="linux-x86_64"
                 ;;
             *)
-                echo "Error: hanzo-vm Linux builds currently support ARM64 only. Detected: $ARCH" >&2
+                echo "Error: hanzo-vm Linux builds support aarch64 and x86_64. Detected: $ARCH" >&2
                 exit 1
                 ;;
         esac
