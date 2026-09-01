@@ -52,6 +52,7 @@ pub struct VmConfigBuilder {
     network_fd: Option<i32>,
     nbd_uri: Option<String>,
     mounts: Vec<MountConfig>,
+    sync_disk: bool,
 }
 
 impl VmConfigBuilder {
@@ -67,7 +68,17 @@ impl VmConfigBuilder {
             network_fd: None,
             nbd_uri: None,
             mounts: Vec::new(),
+            sync_disk: true,
         }
+    }
+
+    /// When false, the disk image is attached with no host durability
+    /// (SynchronizationMode::None). Only for throwaway disks that are
+    /// discarded when the VM stops — never for disks read back afterwards
+    /// (checkpoints).
+    pub fn sync_disk(mut self, enabled: bool) -> Self {
+        self.sync_disk = enabled;
+        self
     }
 
     /// When false, serial console stdin is disconnected and stdout goes to
@@ -141,10 +152,13 @@ impl VmConfigBuilder {
             boot_loader.set_initrd(initrd);
         }
 
+        // mitigations=off: the guest is disposable and holds no secrets
+        // (the proxy substitutes secret placeholders host-side), so CPU
+        // vulnerability mitigations inside it buy nothing and cost cycles.
         let cmdline = if self.verbose {
-            "console=hvc0 root=/dev/vda rw init=/usr/bin/vm-guest"
+            "console=hvc0 root=/dev/vda rw init=/usr/bin/vm-guest mitigations=off printk.time=1"
         } else {
-            "console=hvc0 root=/dev/vda rw init=/usr/bin/vm-guest quiet"
+            "console=hvc0 root=/dev/vda rw init=/usr/bin/vm-guest quiet mitigations=off printk.time=1"
         };
         boot_loader.set_command_line(cmdline);
 
@@ -174,11 +188,16 @@ impl VmConfigBuilder {
                 .map_err(|e| anyhow::anyhow!("Failed to create NBD attachment: {}", e))?;
             VirtioBlockDevice::new(&nbd_attachment)
         } else {
+            let sync_mode = if self.sync_disk {
+                DiskImageSynchronizationMode::Fsync
+            } else {
+                DiskImageSynchronizationMode::None
+            };
             disk_attachment = DiskImageAttachment::new_with_options(
                 &rootfs_path,
                 false,
                 DiskImageCachingMode::Cached,
-                DiskImageSynchronizationMode::Fsync,
+                sync_mode,
             )
             .map_err(|e| anyhow::anyhow!("Failed to create disk attachment: {}", e))?;
             VirtioBlockDevice::new(&disk_attachment)
