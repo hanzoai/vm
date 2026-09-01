@@ -103,6 +103,7 @@ mod guest {
             Some("newinstance,ptmxmode=0666"),
         );
         mount_fs("tmpfs", "/tmp", "tmpfs", None);
+        mount_fs("cgroup2", "/sys/fs/cgroup", "cgroup2", None);
     }
 
     fn process_mount(req: &MountRequest) -> MountResponse {
@@ -1632,10 +1633,17 @@ mod guest {
         ensure_stdio();
         stage("filesystems mounted");
 
-        // Set hostname
-        let hostname = b"vm\0";
+        // Set hostname and make localhost + hostname resolvable
+        let hostname = b"hanzo-vm\0";
         unsafe {
-            libc::sethostname(hostname.as_ptr() as *const libc::c_char, 2);
+            libc::sethostname(hostname.as_ptr() as *const libc::c_char, hostname.len() - 1);
+        }
+        if !std::path::Path::new("/etc/hosts").exists() {
+            std::fs::write(
+                "/etc/hosts",
+                "127.0.0.1\tlocalhost\n127.0.1.1\thanzo-vm\n::1\tlocalhost ip6-localhost ip6-loopback\n",
+            )
+            .ok();
         }
 
         setup_networking();
