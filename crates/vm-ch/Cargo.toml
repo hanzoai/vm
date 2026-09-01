@@ -1,0 +1,18 @@
+[package]
+name = "vm-ch"
+version = "0.1.0"
+edition = "2021"
+description = "cloud-hypervisor backend for Hanzo VM"
+license = "Apache-2.0"
+repository = "https://github.com/hanzoai/vm"
+
+[dependencies]
+libc = "0.2"
+crossbeam-channel = "0.5"
+serde_json = "1"
+vhost = { version = "0.17", features = ["vhost-user-backend"] }
+vhost-user-backend = "0.23"
+virtio-bindings = "0.2"
+virtio-queue = "0.18"
+vm-memory = { version = "0.18", features = ["backend-mmap", "backend-atomic"] }
+vmm-sys-util = "0.15"

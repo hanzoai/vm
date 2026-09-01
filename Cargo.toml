@@ -4,6 +4,7 @@ members = [
     "crates/vm-cli",
     "crates/vm-darwin",
     "crates/vm-linux",
+    "crates/vm-ch",
     "crates/vm-proto",
     "crates/vm-proxy",
     "crates/vm-sdk",
