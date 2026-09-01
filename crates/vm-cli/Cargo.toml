@@ -1,0 +1,31 @@
+[package]
+name = "hanzo-vm"
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+repository = "https://github.com/hanzoai/vm"
+
+[[bin]]
+name = "hanzo-vm"
+path = "src/main.rs"
+
+[dev-dependencies]
+tempfile = "3"
+
+[dependencies]
+vm = { path = "../vm" }
+vm-proto = { path = "../vm-proto" }
+vm-proxy = { path = "../vm-proxy" }
+vm-store = { path = "../vm-store" }
+blake3 = "1"
+clap = { version = "4", features = ["derive", "env"] }
+anyhow = "1"
+libc = "0.2"
+flate2 = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tar = "0.4.45"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+ureq = { version = "3", features = ["json"] }
+base64 = "0.22.1"

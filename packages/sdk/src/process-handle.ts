@@ -1,4 +1,4 @@
-import type { ShuruProcess } from "./process";
+import type { VmProcess } from "./process";
 
 type EventMap = {
 	stdout: (data: Buffer) => void;
@@ -9,14 +9,14 @@ type EventMap = {
 export class SandboxProcess {
 	readonly pid: string;
 	readonly exited: Promise<number>;
-	private proc: ShuruProcess;
+	private proc: VmProcess;
 	private listeners: {
 		stdout: ((data: Buffer) => void)[];
 		stderr: ((data: Buffer) => void)[];
 		exit: ((code: number) => void)[];
 	} = { stdout: [], stderr: [], exit: [] };
 
-	constructor(proc: ShuruProcess, pid: string) {
+	constructor(proc: VmProcess, pid: string) {
 		this.proc = proc;
 		this.pid = pid;
 

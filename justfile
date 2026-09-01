@@ -1,5 +1,6 @@
 guest_target := "aarch64-unknown-linux-musl"
-binary := "target/debug/shuru"
+binary := "target/debug/hanzo-vm"
+data_dir := env_var_or_default("HANZO_VM_HOME", env_var("HOME") + "/.hanzo/vm")
 
 # List available recipes
 default:
@@ -7,20 +8,20 @@ default:
 
 # Build the guest init binary (cross-compiled to aarch64 musl)
 build-guest:
-    cargo build -p shuru-guest --target {{ guest_target }} --release
+    cargo build -p vm-guest --target {{ guest_target }} --release
 
 # Build the CLI binary (debug)
 build-cli:
-    cargo build -p shuru-cli
+    cargo build -p hanzo-vm
 
-# Codesign the CLI binary with virtualization entitlement
+# Codesign the CLI binary with the virtualization entitlement
 codesign:
-    codesign --entitlements shuru.entitlements --force -s - {{ binary }}
+    codesign --entitlements vm.entitlements --force -s - {{ binary }}
 
 # Build everything: guest + CLI + codesign
 build: build-guest build-cli codesign
 
-# Prepare the rootfs, kernel, and initramfs (requires Docker)
+# Build the kernel, initramfs and rootfs into the data dir
 prepare-rootfs:
     ./scripts/prepare-rootfs.sh
 
@@ -39,20 +40,20 @@ setup: prepare-rootfs build
 check:
     cargo check --workspace
 
-# Run clippy on all crates
+# Clippy with CI's settings
 clippy:
-    cargo clippy --workspace
+    cargo clippy --all-targets -- -D warnings
 
-# Install the binary to ~/.local/bin with codesign
+# Install the release binary to ~/.local/bin/hanzo-vm
 install: build-guest
-    cargo build -p shuru-cli --release
-    codesign --entitlements shuru.entitlements --force -s - target/release/shuru
+    cargo build -p hanzo-vm --release
+    codesign --entitlements vm.entitlements --force -s - target/release/hanzo-vm
     mkdir -p ~/.local/bin
-    cp target/release/shuru ~/.local/bin/shuru
-    mkdir -p ~/.local/share/shuru
-    cargo pkgid -p shuru-cli | sed 's/.*#//' > ~/.local/share/shuru/VERSION
+    cp target/release/hanzo-vm ~/.local/bin/hanzo-vm
+    mkdir -p {{ data_dir }}
+    cargo pkgid -p hanzo-vm | sed 's/.*#//' > {{ data_dir }}/VERSION
 
-# Tag and push a release (triggers GitHub Actions)
+# Tag and push a release (runs .hanzo/workflows/release.yml)
 release version:
     git tag -a "v{{ version }}" -m "Release v{{ version }}"
     git push origin "v{{ version }}"

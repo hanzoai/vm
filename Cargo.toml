@@ -1,27 +1,27 @@
 [workspace]
 resolver = "2"
 members = [
-    "crates/shuru-cli",
-    "crates/shuru-darwin",
-    "crates/shuru-linux",
-    "crates/shuru-proto",
-    "crates/shuru-proxy",
-    "crates/shuru-sdk",
-    "crates/shuru-vm",
-    "crates/shuru-store",
-    "crates/shuru-guest",
+    "crates/vm-cli",
+    "crates/vm-darwin",
+    "crates/vm-linux",
+    "crates/vm-proto",
+    "crates/vm-proxy",
+    "crates/vm-sdk",
+    "crates/vm",
+    "crates/vm-store",
+    "crates/vm-guest",
 ]
-# shuru-darwin and shuru-linux are platform-specific — only pulled in
-# transitively via shuru-vm's cfg'd deps. Excluded from default builds
+# vm-darwin and vm-linux are platform-specific — only pulled in
+# transitively via vm's cfg'd deps. Excluded from default builds
 # so `cargo check` doesn't fail on the wrong OS.
 default-members = [
-    "crates/shuru-cli",
-    "crates/shuru-proto",
-    "crates/shuru-proxy",
-    "crates/shuru-sdk",
-    "crates/shuru-vm",
-    "crates/shuru-store",
-    "crates/shuru-guest",
+    "crates/vm-cli",
+    "crates/vm-proto",
+    "crates/vm-proxy",
+    "crates/vm-sdk",
+    "crates/vm",
+    "crates/vm-store",
+    "crates/vm-guest",
 ]
 
 [profile.release]

@@ -1,0 +1,22 @@
+[package]
+name = "vm-sdk"
+version = "0.1.0"
+edition = "2021"
+description = "Async Rust SDK for Hanzo VM microVMs"
+license = "Apache-2.0"
+repository = "https://github.com/hanzoai/vm"
+
+[features]
+default = []
+cas = ["vm-store", "blake3"]
+
+[dependencies]
+vm = { version = "0.1.0", path = "../vm" }
+vm-proto = { version = "0.1.0", path = "../vm-proto" }
+vm-proxy = { version = "0.1.0", path = "../vm-proxy" }
+vm-store = { version = "0.1.0", path = "../vm-store", optional = true }
+tokio = { version = "1", features = ["sync"] }
+anyhow = "1"
+blake3 = { version = "1", optional = true }
+libc = "0.2"
+tracing = "0.1"
