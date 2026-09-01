@@ -16,9 +16,10 @@ files written inside a run never touch the host or the next run.
 
 - **macOS** — Apple Virtualization.framework. Apple Silicon only, arm64 guests
   only, no Rosetta. macOS 14 or later.
-- **Linux** — an experimental KVM backend (`crates/vm-linux`), arm64 hosts with
-  `/dev/kvm`. cloud-hypervisor (amd64 and arm64, VFIO GPU passthrough) is the
-  planned replacement.
+- **Linux arm64** — KVM backend (`crates/vm-linux`), hosts with `/dev/kvm`.
+- **Linux x86_64** — cloud-hypervisor backend (`crates/vm-ch`), hosts with
+  `/dev/kvm` plus the `cloud-hypervisor` and `virtiofsd` binaries (see
+  [Linux hosts](#linux-hosts)).
 
 ## Install
 
@@ -35,6 +36,29 @@ curl -fsSL https://raw.githubusercontent.com/hanzoai/vm/main/install.sh | sh
 Both put `hanzo-vm` in `~/.local/bin`. The first `hanzo-vm run` downloads the
 guest image (kernel, initramfs, root filesystem) from the matching GitHub
 release into `~/.hanzo/vm`; set `HANZO_VM_HOME` to put it elsewhere.
+
+## Linux hosts
+
+Both Linux backends need read/write access to `/dev/kvm` (membership in the
+`kvm` group, or an ACL).
+
+arm64 connects to the guest through the host's vhost-vsock device; grant
+access once with:
+
+```sh
+sudo setfacl -m u:$USER:rw /dev/vhost-vsock
+```
+
+x86_64 drives release binaries of cloud-hypervisor (verified with v53.0) and
+virtiofsd (verified with 1.10.0), looked up on `PATH` and in `~/.local/bin`:
+
+```sh
+curl -fsSLo ~/.local/bin/cloud-hypervisor \
+  https://github.com/cloud-hypervisor/cloud-hypervisor/releases/download/v53.0/cloud-hypervisor-static
+chmod +x ~/.local/bin/cloud-hypervisor
+sudo apt install virtiofsd   # Debian/Ubuntu; installs /usr/libexec/virtiofsd
+install -m 755 /usr/libexec/virtiofsd ~/.local/bin/virtiofsd
+```
 
 ## Usage
 
@@ -181,8 +205,9 @@ just install     # release CLI to ~/.local/bin/hanzo-vm
 ```
 
 The guest image is built by `scripts/prepare-rootfs.sh` (kernel via
-`scripts/build-kernel.sh`); it runs natively on an arm64 Linux host and inside
-Docker on macOS. CI publishes the image with every release.
+`scripts/build-kernel.sh`); it runs natively on arm64 and x86_64 Linux hosts
+(building the guest needs `musl-tools` for the musl target) and inside Docker
+on macOS. CI publishes the image with every release.
 
 ## Changelog
 

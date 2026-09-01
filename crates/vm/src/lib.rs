@@ -10,12 +10,12 @@ pub use vm_proto::{
 
 // The platform backend: Virtualization.framework on macOS, KVM on arm64
 // Linux, cloud-hypervisor on x86_64 Linux. All expose the same vocabulary.
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+pub(crate) use vm_ch as backend;
 #[cfg(target_os = "macos")]
 pub(crate) use vm_darwin as backend;
 #[cfg(all(target_os = "linux", target_arch = "aarch64"))]
 pub(crate) use vm_linux as backend;
-#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
-pub(crate) use vm_ch as backend;
 
 // Re-exports from the backend for advanced/escape-hatch use
 pub use backend::{VirtualMachine, VmState, VzError};

@@ -53,7 +53,10 @@ impl Net {
                     continue;
                 }
                 let n = (desc.len() as usize).min(MAX_FRAME - len);
-                if mem.read_slice(&mut frame[len..len + n], desc.addr()).is_err() {
+                if mem
+                    .read_slice(&mut frame[len..len + n], desc.addr())
+                    .is_err()
+                {
                     break;
                 }
                 len += n;
@@ -112,7 +115,10 @@ impl Net {
                     continue;
                 }
                 let n = (desc.len() as usize).min(total - written);
-                if mem.write_slice(&buf[written..written + n], desc.addr()).is_err() {
+                if mem
+                    .write_slice(&buf[written..written + n], desc.addr())
+                    .is_err()
+                {
                     break;
                 }
                 written += n;
