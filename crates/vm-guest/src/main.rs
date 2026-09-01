@@ -208,8 +208,24 @@ mod guest {
     }
 
     // --- Networking setup ---
-    // Network is configured by initramfs before switch_root (static IP for proxy).
-    // By the time we get here, eth0 already has an IP if --allow-net was used.
+    // With direct boot (no initramfs) the guest owns network setup: when a
+    // virtio-net device is present (--allow-net proxy), eth0 gets the static
+    // proxy address. When an initramfs configured it already, this is a no-op.
+
+    /// Static proxy network: 10.0.0.2/24, gateway + DNS at 10.0.0.1.
+    fn configure_eth0() {
+        let ip = |args: &[&str]| {
+            let _ = Command::new("ip")
+                .args(args)
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .status();
+        };
+        ip(&["addr", "add", "10.0.0.2/24", "dev", "eth0"]);
+        ip(&["link", "set", "eth0", "up"]);
+        ip(&["route", "add", "default", "via", "10.0.0.1"]);
+        let _ = std::fs::write("/etc/resolv.conf", "nameserver 10.0.0.1\n");
+    }
 
     fn setup_networking() {
         unsafe {
@@ -254,8 +270,76 @@ mod guest {
             if has_ip {
                 eprintln!("vm-guest: network already configured (by initramfs)");
             } else {
-                eprintln!("vm-guest: eth0 present but no IP configured");
+                configure_eth0();
+                eprintln!("vm-guest: eth0 configured (10.0.0.2 via 10.0.0.1)");
             }
+        }
+    }
+
+    /// Grow the root ext4 filesystem to fill /dev/vda (online resize ioctl,
+    /// no e2fsprogs needed). With direct boot there is no initramfs running
+    /// resize2fs, so --disk-size beyond the image's filesystem lands here.
+    /// The filesystem block count comes from the ext4 superblock (byte 1024
+    /// of the device: s_blocks_count_lo at +4, s_log_block_size at +24), so
+    /// the common case — disk equals the image — is an exact no-op.
+    fn grow_rootfs() {
+        use std::os::unix::fs::FileExt;
+        const BLKGETSIZE64: libc::c_ulong = 0x8008_1272; // _IOR(0x12, 114, size_t)
+        const EXT4_IOC_RESIZE_FS: libc::c_ulong = 0x4008_6610; // _IOW('f', 16, u64)
+
+        let Ok(dev) = std::fs::File::open("/dev/vda") else {
+            return;
+        };
+        let mut sb = [0u8; 28];
+        if dev.read_exact_at(&mut sb, 1024).is_err() {
+            return;
+        }
+        let fs_blocks = u32::from_le_bytes(sb[4..8].try_into().unwrap()) as u64;
+        let log_bsize = u32::from_le_bytes(sb[24..28].try_into().unwrap());
+        if log_bsize > 6 {
+            return; // not a sane ext4 superblock
+        }
+        let bsize = 1024u64 << log_bsize;
+
+        let mut dev_bytes: u64 = 0;
+        let r = unsafe {
+            libc::ioctl(
+                std::os::unix::io::AsRawFd::as_raw_fd(&dev),
+                BLKGETSIZE64 as _,
+                &mut dev_bytes,
+            )
+        };
+        drop(dev);
+        if r != 0 {
+            return;
+        }
+        let target = dev_bytes / bsize;
+        if target <= fs_blocks {
+            return;
+        }
+
+        let Ok(root) = std::fs::File::open("/") else {
+            return;
+        };
+        let ok = unsafe {
+            libc::ioctl(
+                std::os::unix::io::AsRawFd::as_raw_fd(&root),
+                EXT4_IOC_RESIZE_FS as _,
+                &target,
+            ) == 0
+        };
+        if ok {
+            stage(&format!(
+                "rootfs grown to {} blocks ({}MB)",
+                target,
+                target * bsize / 1024 / 1024
+            ));
+        } else {
+            eprintln!(
+                "vm-guest: online resize to {} blocks failed: {}",
+                target,
+                std::io::Error::last_os_error()
+            );
         }
     }
 
@@ -1632,6 +1716,10 @@ mod guest {
         mount_filesystems();
         ensure_stdio();
         stage("filesystems mounted");
+
+        // Fill /dev/vda if the host asked for a bigger disk than the image.
+        // Runs off the critical path so the vsock listener opens sooner.
+        std::thread::spawn(grow_rootfs);
 
         // Set hostname and make localhost + hostname resolvable
         let hostname = b"hanzo-vm\0";
