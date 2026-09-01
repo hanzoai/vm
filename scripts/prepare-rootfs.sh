@@ -109,7 +109,7 @@ DPKG
 
     $SUDO chroot "$ROOT" apt-get update -qq
     $SUDO chroot "$ROOT" apt-get install -y -qq --no-install-recommends \
-        ca-certificates curl git iproute2 \
+        ca-certificates curl git iproute2 iptables nftables \
         openssh-client jq less procps xz-utils libgomp1 libatomic1 > /dev/null 2>&1
     $SUDO rm -rf "${ROOT}/usr/share/doc/"* "${ROOT}/usr/share/man/"* "${ROOT}/usr/share/info/"*
     $SUDO find "${ROOT}/usr/share/locale" -mindepth 1 -maxdepth 1 ! -name "en*" -exec rm -rf {} + 2>/dev/null || true
@@ -118,7 +118,8 @@ DPKG
 
     $SUDO install -m 755 "$GUEST_BINARY" "${ROOT}/usr/bin/vm-guest"
     $SUDO mkdir -p "${ROOT}/proc" "${ROOT}/sys" "${ROOT}/dev" "${ROOT}/tmp" "${ROOT}/run"
-    echo "vm" | $SUDO tee "${ROOT}/etc/hostname" > /dev/null
+    echo "hanzo-vm" | $SUDO tee "${ROOT}/etc/hostname" > /dev/null
+    printf '127.0.0.1\tlocalhost\n127.0.1.1\thanzo-vm\n::1\tlocalhost ip6-localhost ip6-loopback\n' | $SUDO tee "${ROOT}/etc/hosts" > /dev/null
     echo "nameserver 8.8.8.8" | $SUDO tee "${ROOT}/etc/resolv.conf" > /dev/null
 
     truncate -s "${ROOTFS_SIZE_MB}M" "${DATA_DIR}/rootfs.ext4"
