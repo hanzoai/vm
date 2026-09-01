@@ -130,17 +130,15 @@ impl VirtualMachine {
     }
 
     pub fn start(&self) -> Result<()> {
-        let ch_bin = find_binary("cloud-hypervisor").ok_or_else(|| {
-            VzError::new("cloud-hypervisor not found on PATH or in ~/.local/bin")
-        })?;
+        let ch_bin = find_binary("cloud-hypervisor")
+            .ok_or_else(|| VzError::new("cloud-hypervisor not found on PATH or in ~/.local/bin"))?;
 
         // One virtiofsd child per shared directory; the socket must be
         // listening before cloud-hypervisor creates the device.
         let mut fs_sockets = Vec::new();
         if !self.config.mounts.is_empty() {
-            let fsd_bin = find_binary("virtiofsd").ok_or_else(|| {
-                VzError::new("virtiofsd not found on PATH or in ~/.local/bin")
-            })?;
+            let fsd_bin = find_binary("virtiofsd")
+                .ok_or_else(|| VzError::new("virtiofsd not found on PATH or in ~/.local/bin"))?;
             for (tag, host_path, _read_only) in &self.config.mounts {
                 let socket = self.run_dir.join(format!("fs-{}.sock", tag));
                 let log = std::fs::File::create(self.run_dir.join(format!("fs-{}.log", tag)))
@@ -180,9 +178,11 @@ impl VirtualMachine {
         // Serial console: the virtio-console is wired to the child's stdio.
         let stdio_of = |fd: &Option<OwnedFd>| -> Result<Stdio> {
             match fd {
-                Some(fd) => Ok(Stdio::from(fd.try_clone().map_err(|e| {
-                    VzError::new(format!("dup console fd: {}", e))
-                })?)),
+                Some(fd) => {
+                    Ok(Stdio::from(fd.try_clone().map_err(|e| {
+                        VzError::new(format!("dup console fd: {}", e))
+                    })?))
+                }
                 None => Ok(Stdio::null()),
             }
         };
