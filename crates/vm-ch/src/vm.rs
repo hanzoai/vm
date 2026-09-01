@@ -34,6 +34,10 @@ pub enum VmState {
 
 pub struct VirtualMachine {
     config: ConfigData,
+    // Duplicated at construction time: the caller's fds (e.g. an opened
+    // /dev/null) may not outlive the configuration.
+    serial_in: Option<OwnedFd>,
+    serial_out: Option<OwnedFd>,
     run_dir: PathBuf,
     api_socket: String,
     vsock_socket: String,
@@ -63,17 +67,13 @@ fn find_binary(name: &str) -> Option<PathBuf> {
     None
 }
 
-/// Duplicate a raw fd into an owned handle for child stdio.
-fn dup_stdio(fd: i32) -> Result<Stdio> {
+/// Duplicate a raw fd; None if the fd is invalid.
+fn dup_owned(fd: i32) -> Option<OwnedFd> {
     let duped = unsafe { libc::dup(fd) };
     if duped < 0 {
-        return Err(VzError::new(format!(
-            "dup({}) failed: {}",
-            fd,
-            std::io::Error::last_os_error()
-        )));
+        return None;
     }
-    Ok(Stdio::from(unsafe { OwnedFd::from_raw_fd(duped) }))
+    Some(unsafe { OwnedFd::from_raw_fd(duped) })
 }
 
 fn wait_for_socket(path: &str, timeout: Duration) -> bool {
@@ -90,6 +90,8 @@ fn wait_for_socket(path: &str, timeout: Duration) -> bool {
 impl VirtualMachine {
     pub fn new(config: &VirtualMachineConfiguration) -> Self {
         let inner = config.inner.borrow().clone();
+        let serial_in = inner.serial_read_fd.and_then(dup_owned);
+        let serial_out = inner.serial_write_fd.and_then(dup_owned);
         let (state_tx, state_rx) = bounded(1);
 
         // Sockets live next to the disk (the per-instance directory), or in
@@ -110,6 +112,8 @@ impl VirtualMachine {
 
         VirtualMachine {
             config: inner,
+            serial_in,
+            serial_out,
             run_dir,
             api_socket,
             vsock_socket,
@@ -174,14 +178,16 @@ impl VirtualMachine {
         }
 
         // Serial console: the virtio-console is wired to the child's stdio.
-        let stdin = match self.config.serial_read_fd {
-            Some(fd) => dup_stdio(fd)?,
-            None => Stdio::null(),
+        let stdio_of = |fd: &Option<OwnedFd>| -> Result<Stdio> {
+            match fd {
+                Some(fd) => Ok(Stdio::from(fd.try_clone().map_err(|e| {
+                    VzError::new(format!("dup console fd: {}", e))
+                })?)),
+                None => Ok(Stdio::null()),
+            }
         };
-        let stdout = match self.config.serial_write_fd {
-            Some(fd) => dup_stdio(fd)?,
-            None => Stdio::null(),
-        };
+        let stdin = stdio_of(&self.serial_in)?;
+        let stdout = stdio_of(&self.serial_out)?;
 
         let _ = std::fs::remove_file(&self.api_socket);
         let _ = std::fs::remove_file(&self.vsock_socket);
@@ -242,14 +248,25 @@ impl VirtualMachine {
             "memory": { "size": c.memory_size, "shared": true },
             "payload": { "kernel": c.kernel_path, "cmdline": c.command_line },
             "serial": { "mode": "Off" },
-            "console": { "mode": "Tty" },
             "rng": { "src": "/dev/urandom" },
         });
+        // Interactive consoles need Tty for input; otherwise write console
+        // output through the child's own stdout (Tty mode EBADFs on a
+        // non-terminal stdout).
+        cfg["console"] = if c.serial_read_fd.is_some() {
+            serde_json::json!({ "mode": "Tty" })
+        } else {
+            serde_json::json!({ "mode": "File", "file": "/proc/self/fd/1" })
+        };
         if let Some(ref initrd) = c.initrd_path {
             cfg["payload"]["initramfs"] = serde_json::json!(initrd);
         }
         if let Some(ref disk) = c.disk_path {
-            cfg["disks"] = serde_json::json!([{ "path": disk, "readonly": c.disk_read_only }]);
+            cfg["disks"] = serde_json::json!([{
+                "path": disk,
+                "readonly": c.disk_read_only,
+                "image_type": "Raw",
+            }]);
         }
         if c.has_socket {
             cfg["vsock"] = serde_json::json!({ "cid": GUEST_CID, "socket": self.vsock_socket });
