@@ -28,7 +28,21 @@ if [ ! -d "${BUILD_DIR}/linux-${KERNEL_VERSION}" ]; then
     rm -f "${BUILD_DIR}/linux-${KERNEL_VERSION}.tar.xz"
 fi
 
-if [ "$(uname -m)" = "aarch64" ] && [ "$(uname -s)" = "Linux" ]; then
+if [ "$(uname -m)" = "x86_64" ] && [ "$(uname -s)" = "Linux" ]; then
+    echo "    Native x86_64 Linux detected, building without Docker"
+
+    cd "${BUILD_DIR}/linux-${KERNEL_VERSION}"
+
+    cp "${REPO_DIR}/kernel/vm_defconfig_x86" arch/x86/configs/vm_defconfig
+    make ARCH=x86_64 vm_defconfig
+
+    echo "    Compiling kernel (this takes a few minutes)..."
+    make ARCH=x86_64 -j"$(nproc)" vmlinux 2>&1 | tail -5
+
+    # cloud-hypervisor direct-boots the uncompressed ELF via its PVH entry.
+    strip -o "${DATA_DIR}/Image" vmlinux
+    echo "    Kernel built: $(du -h "${DATA_DIR}/Image" | cut -f1)"
+elif [ "$(uname -m)" = "aarch64" ] && [ "$(uname -s)" = "Linux" ]; then
     echo "    Native aarch64 Linux detected, building without Docker"
 
     cd "${BUILD_DIR}/linux-${KERNEL_VERSION}"
