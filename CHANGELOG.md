@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- Linux x86_64 backend (`crates/vm-ch`): drives cloud-hypervisor over its API
+  socket, virtiofsd for mounts, an in-process vhost-user-net backend for
+  `--allow-net`, and hybrid vsock. Guest assets build for the host arch
+  (PVH vmlinux kernel, amd64 rootfs); OS tarballs are per-arch
+  (`hanzo-vm-os-<tag>-<arch>.tar.gz`).
+
 ## 0.1.0
 
 First release of Hanzo VM.
