@@ -74,7 +74,9 @@ jobs:
       - run: ./scripts/prepare-rootfs.sh
         env:
           HANZO_VM_HOME: ${{ github.workspace }}/os
-      - run: tar czf "hanzo-vm-os-${TAG}-aarch64.tar.gz" -C os Image initramfs.cpio.gz rootfs.ext4
+      # --sparse: rootfs.ext4 is a mostly-empty 4GB image; the GNU sparse
+      # entries let the tar crate in assets.rs restore the holes on extract.
+      - run: tar --format=gnu --sparse -czf "hanzo-vm-os-${TAG}-aarch64.tar.gz" -C os Image initramfs.cpio.gz rootfs.ext4
       - run: |
           gh release create "$TAG" --title "$TAG" --notes "Release $TAG" 2>/dev/null || true
           gh release upload "$TAG" "hanzo-vm-os-${TAG}-aarch64.tar.gz" --clobber

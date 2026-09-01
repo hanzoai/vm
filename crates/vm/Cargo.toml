@@ -1,6 +1,6 @@
 [package]
 name = "vm"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 description = "Hanzo microVM: boot, exec, mounts, ports, checkpoints"
 license = "Apache-2.0"
