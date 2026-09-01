@@ -2,8 +2,7 @@
 
 - Status: Implemented
 - Date: 2026-08-04
-- Scope: shuru-proxy, shuru-cli config, shuru-sdk public types
-- Issue: superhq-ai/shuru#40
+- Scope: vm-proxy, vm-cli config, vm-sdk public types
 
 ## Summary
 
@@ -22,7 +21,7 @@ anywhere in the byte stream. Appendix A works through why.
 
 ## Motivation
 
-Secrets resolve from the host environment of the shuru process, which is
+Secrets resolve from the host environment of the hanzo-vm process, which is
 frozen at exec. A VM that runs for ninety minutes against a sixty minute token
 fails with an auth error after most of the work is already done. The only
 workaround today is to split the task across VM boots using checkpoints.
@@ -38,7 +37,7 @@ anything useful even in the window where it holds a live session.
 
 ## Non-goals
 
-- A control socket or `shuru secret set` command. That needs a per VM control
+- A control socket or `hanzo-vm secret set` command. That needs a per VM control
   plane, which does not exist and should not be motivated by secrets alone.
 - File watching. Secrets at rest plus partial write races, for no benefit over
   a command.
@@ -102,7 +101,7 @@ hosts are already known from config and there is nothing to pass in.
 Exactly one of `from` or `command` must be set. Both, or neither, is a config
 error reported at load time rather than at first request.
 
-`command` is an argv array, not a shell string. No shell sits between shuru
+`command` is an argv array, not a shell string. No shell sits between hanzo-vm
 and a credential, and there is no quoting hazard for paths with spaces.
 
 `ttl` is an optional duration string (`"45m"`, `"3600s"`) used only when the
@@ -111,8 +110,8 @@ command reports no expiry of its own.
 ### Provider contract
 
 The command runs with stdin closed, inheriting the host environment of the
-shuru process, with the working directory set to the directory holding the
-resolved config file so relative paths behave the same wherever shuru is
+hanzo-vm process, with the working directory set to the directory holding the
+resolved config file so relative paths behave the same wherever hanzo-vm is
 invoked from.
 
 On success it exits zero having written one JSON object to stdout:
@@ -255,7 +254,7 @@ appearing in a body is now left alone.
 
 New surface is one subprocess spawned by the host, from an argv array in a
 config file the user controls, with no guest input reaching it. A hostile
-`shuru.json` can already run arbitrary code on `shuru run`, so this adds no
+`vm.json` can already run arbitrary code on `hanzo-vm run`, so this adds no
 capability that did not exist.
 
 Substitution is best effort against a cooperative guest and is not a
@@ -292,10 +291,10 @@ Verified end to end against a live endpoint that echoes the request:
 
 Additive for configuration. Existing configs using `from` behave as before.
 
-`SecretConfig` is re-exported from shuru-sdk, so the field changes are
+`SecretConfig` is re-exported from vm-sdk, so the field changes are
 breaking for SDK consumers building it as a struct literal. It gains
 `Default`, with `SecretConfig::from_env` and `SecretConfig::from_command` as
-the constructors. shuru-proxy goes to 0.3.0 and shuru-sdk to 0.4.0.
+the constructors. vm-proxy goes to 0.3.0 and vm-sdk to 0.4.0.
 
 Behaviour change: a secret placed in a request body is no longer substituted.
 Appendix A shows this never worked for any real credential length, so no
@@ -376,7 +375,7 @@ length", and "it is recommended not to stream messages you need to modify".
 - **Length-matched placeholders**, generated to be exactly as long as the
   secret so substitution preserves framing by construction. Cheap and
   tempting, but entropy falls with the secret: 80 bits today, 40 against a 20
-  byte AWS key id, and under 10 bytes there is no room for the `shuru_tok_`
+  byte AWS key id, and under 10 bytes there is no room for the `hanzo_tok_`
   marker at all. A short placeholder starts colliding with ordinary request
   text, and a collision writes a real credential into unrelated data, which is
   worse than not substituting. Viable only with a length floor.
@@ -388,7 +387,7 @@ real value on the way out and does nothing on the way back, so an upstream
 that reflects the request hands the credential to the guest:
 
 ```
-guest env holds: shuru_tok_18c8ae1dd13ae8680000
+guest env holds: hanzo_tok_18c8ae1dd13ae8680000
 "authorization":"Bearer sk-live-REAL-CREDENTIAL-DO-NOT-LEAK"
 ```
 
@@ -411,5 +410,5 @@ response direction. This wants its own issue and its own design.
   because the proxy composes the header rather than finding and rewriting
   something the guest wrote. Complementary to substitution rather than a
   replacement, since it does not cover query parameters or bodies.
-- A `shuru secret set` control command, once a general per VM control plane
+- A `hanzo-vm secret set` control command, once a general per VM control plane
   exists for port exposure and network policy changes.

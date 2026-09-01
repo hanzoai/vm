@@ -1,4 +1,4 @@
-import { ShuruProcess } from "./process";
+import { VmProcess } from "./process";
 import { SandboxProcess } from "./process-handle";
 import type {
 	CopyOptions,
@@ -31,18 +31,18 @@ const Method = {
 } as const;
 
 export class Sandbox {
-	private proc: ShuruProcess;
+	private proc: VmProcess;
 	private stopped = false;
 
-	private constructor(proc: ShuruProcess) {
+	private constructor(proc: VmProcess) {
 		this.proc = proc;
 	}
 
 	static async start(opts: StartOptions = {}): Promise<Sandbox> {
-		const bin = opts.shuruBin ?? "shuru";
+		const bin = opts.bin ?? "hanzo-vm";
 		const args = buildArgs(bin, opts);
 
-		const proc = new ShuruProcess();
+		const proc = new VmProcess();
 		await proc.start(args);
 
 		return new Sandbox(proc);

@@ -1,13 +1,13 @@
 {
-  "name": "@superhq/shuru",
-  "version": "0.4.2",
+  "name": "@hanzo/vm",
+  "version": "0.1.0",
   "type": "module",
   "main": "src/index.ts",
   "types": "src/index.ts",
   "files": ["src"],
   "repository": {
     "type": "git",
-    "url": "https://github.com/superhq-ai/shuru",
+    "url": "https://github.com/hanzoai/vm",
     "directory": "packages/sdk"
   },
   "scripts": {

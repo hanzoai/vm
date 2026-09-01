@@ -1,137 +1,148 @@
-# shuru
+# Hanzo VM
 
-Local-first microVM sandbox for AI agents on macOS, with experimental Linux support.
+Hanzo's microVM layer. `hanzo-vm` boots a small Linux guest on the host you are
+on, runs a command in it, and throws the disk away when the command exits. The
+guest gets a copy-on-write clone of the root image, so packages installed and
+files written inside a run never touch the host or the next run.
 
-Shuru boots lightweight Linux VMs for AI agents. On macOS it uses Apple's Virtualization.framework. On Linux it uses a KVM backend that is now available as an experimental release build for ARM64 hosts. Every sandbox is ephemeral: the rootfs resets on every run, giving agents a disposable environment to execute code, install packages, and run tools without touching your host.
+## Vocabulary
 
-> [!WARNING]
-> **Experimental Linux support.** Linux builds are available for testing, but they are not ready for production use yet. Expect rough edges, missing polish, and compatibility gaps.
+- **vm** — a microVM booted on a host we control. This repository.
+- **sandbox** — a hosted lease of a vm with policy (`/v1/sandbox` in Hanzo
+  Cloud). Not a local noun; nothing here is called a sandbox.
+- **machine** — a host (Visor).
 
-## Requirements
+## Backends
 
-- macOS 14 (Sonoma) or later on Apple Silicon
-- Linux ARM64 with KVM access (`/dev/kvm`) for experimental testing only
+- **macOS** — Apple Virtualization.framework. Apple Silicon only, arm64 guests
+  only, no Rosetta. macOS 14 or later.
+- **Linux** — an experimental KVM backend (`crates/vm-linux`), arm64 hosts with
+  `/dev/kvm`. cloud-hypervisor (amd64 and arm64, VFIO GPU passthrough) is the
+  planned replacement.
 
 ## Install
 
 ```sh
-brew tap superhq-ai/tap && brew install shuru
+cargo install hanzo-vm
 ```
 
-Or via the install script:
+or the release binary:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/superhq-ai/shuru/main/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/hanzoai/vm/main/install.sh | sh
 ```
 
-The install script supports macOS on Apple Silicon and experimental Linux ARM64. Linux users can also download the `linux-aarch64` release tarball manually from GitHub Releases if they prefer.
-
-> [!NOTE]
-> Homebrew remains macOS-only. Linux installs via the script are still experimental and not ready for production use.
+Both put `hanzo-vm` in `~/.local/bin`. The first `hanzo-vm run` downloads the
+guest image (kernel, initramfs, root filesystem) from the matching GitHub
+release into `~/.hanzo/vm`; set `HANZO_VM_HOME` to put it elsewhere.
 
 ## Usage
 
 ```sh
 # Interactive shell
-shuru run
+hanzo-vm run
 
 # Run a command
-shuru run -- echo hello
+hanzo-vm run -- echo hello
 
 # With network access
-shuru run --allow-net
+hanzo-vm run --allow-net
 
 # Restrict to specific hosts
-shuru run --allow-net --allow-host api.openai.com --allow-host registry.npmjs.org
+hanzo-vm run --allow-net --allow-host api.openai.com --allow-host registry.npmjs.org
 
 # Use a specific DNS resolver
-shuru run --allow-net --dns-resolver 1.1.1.1 -- curl https://example.com
+hanzo-vm run --allow-net --dns-resolver 1.1.1.1 -- curl https://example.com
 
 # Custom resources
-shuru run --cpus 4 --memory 4096 --disk-size 8192 -- make -j4
+hanzo-vm run --cpus 4 --memory 4096 --disk-size 8192 -- make -j4
 ```
 
 ### Directory mounts
 
-Share host directories into the VM using VirtioFS. By default the host directory is read-only; guest writes go to a tmpfs overlay layer (discarded when the VM exits). Append `:rw` to make the mount read-write — guest writes go directly to the host filesystem.
+Host directories are shared into the guest over VirtioFS. A mount is read-only
+by default; guest writes land in a tmpfs overlay that disappears with the vm.
+Append `:rw` to write through to the host, which also needs
+`--allow-host-writes`. Only paths under the current directory can be mounted.
 
 ```sh
-# Mount a directory (guest can read, writes go to overlay — host is untouched)
-shuru run --mount ./src:/workspace -- touch /workspace/test.txt
-ls ./src/test.txt   # not found — write stayed in the overlay
+# Read-only: the write stays in the overlay
+hanzo-vm run --mount ./src:/workspace -- touch /workspace/test.txt
+ls ./src/test.txt   # not found
 
-# Read-write mount (guest writes land on host, requires --allow-host-writes)
-shuru run --allow-host-writes --mount ./src:/workspace:rw -- touch /workspace/test.txt
-ls ./src/test.txt   # found — write went to host
+# Read-write: the write reaches the host
+hanzo-vm run --allow-host-writes --mount ./src:/workspace:rw -- touch /workspace/test.txt
+ls ./src/test.txt   # found
 
-# Multiple mounts
-shuru run --mount ./src:/workspace --mount ./data:/data -- sh
+# Several mounts
+hanzo-vm run --mount ./src:/workspace --mount ./data:/data -- sh
 ```
 
-Mounts can also be set in `shuru.json` (see [Config file](#config-file)).
-
-> [!NOTE]
-> Directory mounts require checkpoints created on v0.1.11+. Existing checkpoints work normally for all other features. Run `shuru upgrade` to get the latest version.
+Mounts can also be listed in `vm.json` (see [Config file](#config-file)).
 
 ### Port forwarding
 
-Forward host ports to guest ports over vsock. Works without `--allow-net` — the guest needs no network device.
+Host ports are forwarded to guest ports over vsock, so this works without
+`--allow-net` and without a network device in the guest.
 
 ```sh
-# Install python3 into a checkpoint, then serve with port forwarding
-shuru checkpoint create py --allow-net -- apt-get install -y python3
-shuru run --from py -p 8080:8000 -- python3 -m http.server 8000
+# Install python3 into a checkpoint, then serve from it
+hanzo-vm checkpoint create py --allow-net -- apt-get install -y python3
+hanzo-vm run --from py -p 8080:8000 -- python3 -m http.server 8000
 
-# From the host (in another terminal)
+# From the host, in another terminal
 curl http://127.0.0.1:8080/
 
-# Multiple ports
-shuru run -p 8080:80 -p 8443:443 -- nginx
+# Several ports
+hanzo-vm run -p 8080:80 -p 8443:443 -- nginx
 ```
 
-Port forwards can also be set in `shuru.json` (see [Config file](#config-file)).
+Port forwards can also be listed in `vm.json`.
 
 ### Checkpoints
 
-Checkpoints save the disk state so you can reuse an environment across runs.
+A checkpoint saves the disk after a command so later runs start from it.
 
 ```sh
-# Set up an environment and save it
-shuru checkpoint create myenv --allow-net -- sh -c 'apt-get install -y python3 gcc'
+# Build an environment and save it
+hanzo-vm checkpoint create myenv --allow-net -- sh -c 'apt-get install -y python3 gcc'
 
-# Run from a checkpoint (ephemeral -- changes are discarded)
-shuru run --from myenv -- python3 script.py
+# Run from it; changes made during the run are discarded
+hanzo-vm run --from myenv -- python3 script.py
 
 # Branch from an existing checkpoint
-shuru checkpoint create myenv2 --from myenv --allow-net -- sh -c 'pip install numpy'
+hanzo-vm checkpoint create myenv2 --from myenv --allow-net -- sh -c 'pip install numpy'
 
 # List and delete
-shuru checkpoint list
-shuru checkpoint delete myenv
+hanzo-vm checkpoint list
+hanzo-vm checkpoint delete myenv
 ```
 
 ### Secrets
 
-Secrets keep API keys on the host. The guest receives a random placeholder token; the proxy substitutes the real value only on HTTPS requests to the specified hosts. The real secret never enters the VM.
+A secret never enters the guest. The guest sees a random placeholder in the
+named environment variable; the host-side proxy substitutes the real value only
+on HTTPS requests to the listed hosts.
 
 ```sh
-# Inject a secret via CLI
-shuru run --allow-net --secret API_KEY=OPENAI_API_KEY@api.openai.com -- curl https://api.openai.com/v1/models
+hanzo-vm run --allow-net --secret API_KEY=OPENAI_API_KEY@api.openai.com -- curl https://api.openai.com/v1/models
 
-# Multiple secrets
-shuru run --allow-net \
+hanzo-vm run --allow-net \
   --secret API_KEY=OPENAI_API_KEY@api.openai.com \
   --secret GH_TOKEN=GITHUB_TOKEN@api.github.com \
   -- sh
 ```
 
-Format: `NAME=ENV_VAR@host1,host2` — `NAME` is the env var the guest sees, `ENV_VAR` is the host env var with the real value, and hosts are where the proxy substitutes it.
-
-Secrets can also be set in `shuru.json` (see [Config file](#config-file)).
+Format: `NAME=ENV_VAR@host1,host2`. `NAME` is the variable the guest sees,
+`ENV_VAR` is the host variable holding the real value, and the hosts are where
+the proxy substitutes it. A secret in `vm.json` can instead name a `command`
+that mints the value and is re-run as it expires; see
+[docs/rfcs/0002-refreshable-secrets.md](docs/rfcs/0002-refreshable-secrets.md).
 
 ### Config file
 
-Shuru loads `shuru.json` from the current directory (or `--config PATH`). All fields are optional; CLI flags take precedence.
+`hanzo-vm` reads `vm.json` from the current directory, or the file given by
+`--config`. Every field is optional and flags take precedence.
 
 ```json
 {
@@ -154,61 +165,29 @@ Shuru loads `shuru.json` from the current directory (or `--config PATH`). All fi
 }
 ```
 
-The `network.allow` list restricts which hosts the guest can reach. Omit it to allow all hosts.
+`network.allow` restricts which hosts the guest can reach; omit it to allow all.
 
 ## SDK
 
-Use shuru programmatically from TypeScript with the [`@superhq/shuru`](https://www.npmjs.com/package/@superhq/shuru) package.
+`crates/vm-sdk` is the async Rust API over the same vm. `packages/sdk` is the
+TypeScript package `@hanzo/vm`, which drives the `hanzo-vm` binary in
+`--stdio` mode; see [packages/sdk/README.md](packages/sdk/README.md).
+
+## Building from source
 
 ```sh
-bun add @superhq/shuru
+just build       # guest (aarch64 musl) + CLI + ad-hoc codesign
+just install     # release CLI to ~/.local/bin/hanzo-vm
 ```
 
-```ts
-import { Sandbox } from "@superhq/shuru";
-
-const sb = await Sandbox.start({ from: "python-env" });
-
-const result = await sb.exec("python3 -c 'print(1+1)'");
-console.log(result.stdout); // "2\n"
-
-await sb.checkpoint("after-run"); // saves disk state and stops the VM
-```
-
-See the [SDK README](packages/sdk/README.md) for full API docs.
-
-## Agent Skill
-
-Shuru ships as an [agent skill](https://agentskills.io) so AI agents (Claude Code, Cursor, Copilot, etc.) can use it automatically.
-
-```sh
-# Install via Vercel's skills CLI
-npx skills add superhq-ai/shuru
-
-# Or manually copy into your project
-cp -r skills/shuru .claude/skills/shuru
-```
-
-Once installed, agents will use `shuru run` whenever they need sandboxed execution.
+The guest image is built by `scripts/prepare-rootfs.sh` (kernel via
+`scripts/build-kernel.sh`); it runs natively on an arm64 Linux host and inside
+Docker on macOS. CI publishes the image with every release.
 
 ## Changelog
 
-See [CHANGELOG.md](CHANGELOG.md) for release notes and breaking changes.
+See [CHANGELOG.md](CHANGELOG.md).
 
-## Support
+## License
 
-<a href="https://buymeacoffee.com/harshdoesdev" target="_blank"><img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy Me A Coffee" height="40"></a>
-
-## Bugs
-
-File issues at [github.com/superhq-ai/shuru/issues](https://github.com/superhq-ai/shuru/issues).
-
-## Star History
-
-<a href="https://www.star-history.com/?repos=superhq-ai%2Fshuru&type=date&legend=top-left">
- <picture>
-   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=superhq-ai/shuru&type=date&theme=dark&legend=top-left" />
-   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=superhq-ai/shuru&type=date&legend=top-left" />
-   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=superhq-ai/shuru&type=date&legend=top-left" />
- </picture>
-</a>
+Apache-2.0. See [LICENSE](LICENSE) and [NOTICE](NOTICE).

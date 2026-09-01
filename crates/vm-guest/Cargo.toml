@@ -1,0 +1,20 @@
+[package]
+name = "vm-guest"
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+repository = "https://github.com/hanzoai/vm"
+
+[[bin]]
+name = "vm-guest"
+path = "src/main.rs"
+
+[dependencies]
+vm-proto = { path = "../vm-proto" }
+libc = "0.2"
+serde_json = "1"
+ureq = { version = "3", default-features = false, features = ["rustls"] }
+flate2 = "1"
+tar = "0.4.45"
+ignore = "0.4"
+notify = "7"

@@ -1,0 +1,21 @@
+[package]
+name = "vm"
+version = "0.1.0"
+edition = "2021"
+description = "Hanzo microVM: boot, exec, mounts, ports, checkpoints"
+license = "Apache-2.0"
+repository = "https://github.com/hanzoai/vm"
+
+[dependencies]
+vm-proto = { version = "0.1.0", path = "../vm-proto" }
+anyhow = "1"
+crossbeam-channel = "0.5"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tracing = "0.1"
+socket2 = "0.5"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+vm-darwin = { version = "0.1.0", path = "../vm-darwin" }
+[target.'cfg(target_os = "linux")'.dependencies]
+vm-linux = { version = "0.1.0", path = "../vm-linux" }

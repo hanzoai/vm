@@ -1,11 +1,11 @@
 import { resolve } from "node:path";
 import { Sandbox } from "../src/sandbox";
 
-const SHURU_BIN = resolve(import.meta.dir, "../../../target/debug/shuru");
+const HANZO_VM_BIN = resolve(import.meta.dir, "../../../target/debug/hanzo-vm");
 
 async function main() {
 	console.log("starting sandbox...");
-	const sb = await Sandbox.start({ shuruBin: SHURU_BIN });
+	const sb = await Sandbox.start({ bin: HANZO_VM_BIN });
 
 	try {
 		// exec: run a command
