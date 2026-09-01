@@ -1,12 +1,16 @@
 # Changelog
 
-## Unreleased
+## 0.1.2
 
 - Linux x86_64 backend (`crates/vm-ch`): drives cloud-hypervisor over its API
   socket, virtiofsd for mounts, an in-process vhost-user-net backend for
   `--allow-net`, and hybrid vsock. Guest assets build for the host arch
   (PVH vmlinux kernel, amd64 rootfs); OS tarballs are per-arch
-  (`hanzo-vm-os-<tag>-<arch>.tar.gz`).
+  (`hanzo-vm-os-<tag>-<arch>.tar.gz`), so x86_64 hosts can cold-start from
+  the release.
+- Sparse-aware rootfs clone on Linux: `ioctl(FICLONE)` reflink where the
+  filesystem supports it, else a SEEK_DATA/SEEK_HOLE + `copy_file_range`
+  sparse copy — a plain copy of the 4 GB image materializes the holes.
 
 ## 0.1.0
 
