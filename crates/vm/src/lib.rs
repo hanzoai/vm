@@ -8,20 +8,17 @@ pub use vm_proto::{
     ReadFileRequest, WriteFileRequest, WriteFileResponse, VSOCK_PORT, VSOCK_PORT_FORWARD,
 };
 
-// Re-exports from platform-specific backend for advanced/escape-hatch use
+// The platform backend: Virtualization.framework on macOS, KVM on arm64
+// Linux, cloud-hypervisor on x86_64 Linux. All expose the same vocabulary.
 #[cfg(target_os = "macos")]
-pub use vm_darwin::VirtualMachine;
-#[cfg(target_os = "macos")]
-pub use vm_darwin::VmState;
-#[cfg(target_os = "macos")]
-pub use vm_darwin::VzError;
+pub(crate) use vm_darwin as backend;
+#[cfg(all(target_os = "linux", target_arch = "aarch64"))]
+pub(crate) use vm_linux as backend;
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+pub(crate) use vm_ch as backend;
 
-#[cfg(target_os = "linux")]
-pub use vm_linux::VirtualMachine;
-#[cfg(target_os = "linux")]
-pub use vm_linux::VmState;
-#[cfg(target_os = "linux")]
-pub use vm_linux::VzError;
+// Re-exports from the backend for advanced/escape-hatch use
+pub use backend::{VirtualMachine, VmState, VzError};
 
 /// Reject checkpoint names that could escape the checkpoints directory.
 pub fn validate_checkpoint_name(name: &str) -> Result<(), String> {

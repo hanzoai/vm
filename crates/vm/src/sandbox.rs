@@ -9,19 +9,9 @@ use std::time::Duration;
 use anyhow::{bail, Context, Result};
 use crossbeam_channel::Receiver;
 
-#[cfg(target_os = "macos")]
-use vm_darwin::network::FileHandleNetworkAttachment;
-#[cfg(target_os = "macos")]
-use vm_darwin::terminal;
-#[cfg(target_os = "macos")]
-use vm_darwin::*;
-
-#[cfg(target_os = "linux")]
-use vm_linux::network::FileHandleNetworkAttachment;
-#[cfg(target_os = "linux")]
-use vm_linux::terminal;
-#[cfg(target_os = "linux")]
-use vm_linux::*;
+use crate::backend::network::FileHandleNetworkAttachment;
+use crate::backend::terminal;
+use crate::backend::*;
 
 use vm_proto::{
     frame, ChmodRequest, CopyRequest, DiscardRequest, ExecRequest, ForwardRequest, ForwardResponse,
