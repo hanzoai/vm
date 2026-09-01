@@ -2044,6 +2044,7 @@ version = "0.1.1"
 dependencies = [
  "anyhow",
  "crossbeam-channel",
+ "libc",
  "serde",
  "serde_json",
  "socket2 0.5.10",

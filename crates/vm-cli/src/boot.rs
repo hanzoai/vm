@@ -23,10 +23,7 @@ pub(crate) fn clone_file(src: &str, dst: &str) -> Result<()> {
 }
 
 #[cfg(target_os = "linux")]
-pub(crate) fn clone_file(src: &str, dst: &str) -> Result<()> {
-    std::fs::copy(src, dst).with_context(|| format!("failed to copy {} -> {}", src, dst))?;
-    Ok(())
-}
+pub(crate) use vm::clone_file;
 
 use vm::{MountConfig, PortMapping, Sandbox};
 

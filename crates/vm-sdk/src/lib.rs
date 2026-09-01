@@ -723,10 +723,7 @@ fn clone_file_cow(src: &str, dst: &str) -> Result<()> {
 }
 
 #[cfg(target_os = "linux")]
-fn clone_file_cow(src: &str, dst: &str) -> Result<()> {
-    std::fs::copy(src, dst).with_context(|| format!("failed to copy {} -> {}", src, dst))?;
-    Ok(())
-}
+use vm::clone_file as clone_file_cow;
 
 struct BootedVm {
     sandbox: vm::Sandbox,
