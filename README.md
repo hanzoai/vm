@@ -24,16 +24,17 @@ files written inside a run never touch the host or the next run.
 ## Install
 
 ```sh
-cargo install hanzo-vm
-```
-
-or the release binary:
-
-```sh
 curl -fsSL https://raw.githubusercontent.com/hanzoai/vm/main/install.sh | sh
 ```
 
-Both put `hanzo-vm` in `~/.local/bin`. The first `hanzo-vm run` downloads the
+or build from crates.io:
+
+```sh
+cargo install hanzo-vm
+```
+
+The installer puts `hanzo-vm` in `~/.local/bin` (cargo uses `~/.cargo/bin`).
+The first `hanzo-vm run` downloads the
 guest image (kernel, initramfs, root filesystem) from the matching GitHub
 release into `~/.hanzo/vm`; set `HANZO_VM_HOME` to put it elsewhere.
 

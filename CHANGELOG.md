@@ -1,5 +1,19 @@
 # Changelog
 
+## 2.0.0
+
+`cargo install hanzo-vm` now installs this CLI. The `hanzo-vm` name on
+crates.io previously carried an unrelated EVM (versions up to 1.1.22, since
+renamed to `hanzo-evm`); 2.0.0 takes the name over for the microVM and jumps
+past those versions. No code change from 0.1.3 beyond the version.
+
+- The library package `vm` is published as `vm-core` (the `vm` name on
+  crates.io belongs to someone else); its library target is still named
+  `vm`, so `use vm::…` is unchanged.
+- Every crate in the workspace and the TypeScript SDK move to 2.0.0
+  together; the OS image tag the CLI downloads follows the crate version
+  as before.
+
 ## 0.1.3
 
 Boot-time release: `run -- true` medians drop from 0.41/0.41/0.71 s to

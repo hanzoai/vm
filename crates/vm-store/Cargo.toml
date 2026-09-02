@@ -1,6 +1,6 @@
 [package]
 name = "vm-store"
-version = "0.1.3"
+version = "2.0.0"
 edition = "2021"
 description = "NBD-backed storage layer for Hanzo VM microVMs"
 license = "Apache-2.0"
