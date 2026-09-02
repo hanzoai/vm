@@ -10,7 +10,11 @@ on:
 
 jobs:
   macos:
-    runs-on: hanzo-build-macos-arm64
+    # hanzo-build-darwin-arm64: the label RUNNERS.md registers for the
+    # Apple pool. hanzo-build-macos-arm64 is not one it lists, and a job
+    # asking for a label no runner advertises queues forever rather than
+    # failing — so the repo keeps looking like it has CI on this leg.
+    runs-on: hanzo-build-darwin-arm64
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
