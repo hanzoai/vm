@@ -7,6 +7,12 @@
 CONFIG_64BIT=y
 CONFIG_SMP=y
 CONFIG_NR_CPUS=16
+# cloud-hypervisor describes vCPUs as x2apic MADT entries; without this the
+# kernel ignores them and boots one CPU no matter how many were given.
+CONFIG_X86_X2APIC=y
+# Initialize struct pages on all CPUs after smp_init instead of serially on
+# the boot CPU — trims the single largest silent stretch of early boot.
+CONFIG_DEFERRED_STRUCT_PAGE_INIT=y
 CONFIG_HYPERVISOR_GUEST=y
 CONFIG_PARAVIRT=y
 CONFIG_KVM_GUEST=y
