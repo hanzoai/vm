@@ -44,8 +44,7 @@ fn main() -> Result<()> {
                 vec!["/bin/sh".to_string()]
             };
 
-            let mut prepared = boot::prepare_vm(&vm, &cfg, from.as_deref())?;
-            prepared.discard_disk = !stdio && !console;
+            let prepared = boot::prepare_vm(&vm, &cfg, from.as_deref(), !stdio && !console)?;
 
             let result = if stdio {
                 stdio::run_stdio(&prepared)
@@ -55,6 +54,9 @@ fn main() -> Result<()> {
                 boot::run_command(&prepared, &command).map(|r| r.exit_code)
             };
 
+            // The work rootfs may live outside the instance dir (tmpfs);
+            // a no-op when the discard path already unlinked it.
+            let _ = std::fs::remove_file(&prepared.work_rootfs);
             let _ = std::fs::remove_dir_all(&prepared.instance_dir);
             boot::trace_boot("instance dir removed");
             process::exit(result?);
@@ -101,6 +103,25 @@ fn main() -> Result<()> {
                 if !alive {
                     std::fs::remove_dir_all(entry.path())?;
                     removed += 1;
+                }
+            }
+
+            // Throwaway work disks of crashed runs may live on tmpfs.
+            #[cfg(target_os = "linux")]
+            if let Ok(entries) = std::fs::read_dir("/dev/shm/hanzo-vm") {
+                for entry in entries.flatten() {
+                    let name = entry.file_name();
+                    let Some(pid) = name
+                        .to_str()
+                        .and_then(|s| s.strip_suffix(".ext4"))
+                        .and_then(|s| s.parse::<i32>().ok())
+                    else {
+                        continue;
+                    };
+                    if unsafe { libc::kill(pid, 0) } != 0 {
+                        let _ = std::fs::remove_file(entry.path());
+                        removed += 1;
+                    }
                 }
             }
 
