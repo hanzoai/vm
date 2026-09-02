@@ -1120,12 +1120,8 @@ impl VirtioBackend for VhostVsockBackend {
         irq: u32,
         _interrupt_status: Arc<AtomicU32>,
     ) {
-        let vhost_fd = unsafe {
-            libc::open(
-                b"/dev/vhost-vsock\0".as_ptr() as *const libc::c_char,
-                libc::O_RDWR | libc::O_CLOEXEC,
-            )
-        };
+        let vhost_fd =
+            unsafe { libc::open(c"/dev/vhost-vsock".as_ptr(), libc::O_RDWR | libc::O_CLOEXEC) };
         if vhost_fd < 0 {
             eprintln!(
                 "hanzo-vm: failed to open /dev/vhost-vsock: {}",
@@ -1147,7 +1143,8 @@ impl VirtioBackend for VhostVsockBackend {
             }
 
             // Negotiate features — get supported, intersect, set
-            let get_features: u64 = (2u64 << 30) | (8u64 << 16) | (VHOST_VIRTIO << 8) | 0x00;
+            // _IOR(VHOST_VIRTIO, 0, u64): dir=read<<30, size=8<<16, type<<8, nr=0.
+            let get_features: u64 = (2u64 << 30) | (8u64 << 16) | (VHOST_VIRTIO << 8);
             let mut avail_features: u64 = 0;
             libc::ioctl(vhost_fd, get_features, &mut avail_features);
             let features = avail_features & VIRTIO_F_VERSION_1;
@@ -1258,7 +1255,7 @@ impl VirtioBackend for VhostVsockBackend {
             self.irq_running.store(true, Ordering::Release);
             let irq_running = self.irq_running.clone();
             let vm_fd_clone = vm_fd.clone();
-            let call_fd_0 = self.call_evts.get(0).map(|e| e.as_raw_fd()).unwrap_or(-1);
+            let call_fd_0 = self.call_evts.first().map(|e| e.as_raw_fd()).unwrap_or(-1);
             let call_fd_1 = self.call_evts.get(1).map(|e| e.as_raw_fd()).unwrap_or(-1);
             let shutdown_fd = self.shutdown_evt.as_raw_fd();
             self.irq_thread = std::thread::Builder::new()

@@ -10,17 +10,24 @@
 //! OPENDIR/READDIR(PLUS), CREATE, UNLINK/MKDIR/RMDIR/RENAME, STATFS,
 //! xattr ops (ENOSYS). Anything else returns ENOSYS; the kernel falls back
 //! gracefully.
+//!
+//! FUSE wire structs and a few helpers are defined for the whole protocol
+//! even where this minimal client path never constructs them, and the
+//! `meta.*() as u32` conversions are written uniformly though some widths
+//! already match on this target — clippy's dead-code and cast lints are
+//! silenced here rather than pruning protocol definitions op by op.
+#![allow(dead_code, clippy::unnecessary_cast, clippy::collapsible_if)]
 
 use std::collections::HashMap;
-use std::ffi::{CStr, CString, OsStr, OsString};
-use std::os::unix::ffi::{OsStrExt, OsStringExt};
+use std::ffi::{CString, OsStr};
+use std::os::unix::ffi::OsStrExt;
 use std::os::unix::fs::MetadataExt;
-use std::path::{Component, Path, PathBuf};
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use kvm_ioctls::VmFd;
-use vm_memory::{Address, Bytes, GuestAddress, GuestMemoryMmap};
+use vm_memory::{Bytes, GuestAddress, GuestMemoryMmap};
 
 use super::devices::{avail_idx, avail_ring_entry, write_used, VirtioBackend, VirtioQueueState};
 
