@@ -756,6 +756,9 @@ pub struct NetBackend {
     mac: [u8; 6],
     rx_running: Arc<AtomicBool>,
     rx_thread: Option<std::thread::JoinHandle<()>>,
+    /// Wakes the rx thread out of poll() so reset() joins immediately
+    /// instead of waiting out the poll timeout.
+    shutdown_evt: EventFd,
 }
 
 impl NetBackend {
@@ -765,6 +768,7 @@ impl NetBackend {
             mac,
             rx_running: Arc::new(AtomicBool::new(false)),
             rx_thread: None,
+            shutdown_evt: EventFd::new(0).expect("eventfd"),
         }
     }
 }
@@ -818,6 +822,7 @@ impl VirtioBackend for NetBackend {
         self.rx_running.store(true, Ordering::Release);
         let running = self.rx_running.clone();
         let fd = self.fd;
+        let shutdown_fd = self.shutdown_evt.as_raw_fd();
         let mem = mem.clone();
         let vm_fd = vm_fd.clone();
 
@@ -825,7 +830,16 @@ impl VirtioBackend for NetBackend {
             std::thread::Builder::new()
                 .name("vm-net-rx".into())
                 .spawn(move || {
-                    net_rx_loop(fd, mem, rx_q, vm_fd, irq, interrupt_status, running);
+                    net_rx_loop(
+                        fd,
+                        shutdown_fd,
+                        mem,
+                        rx_q,
+                        vm_fd,
+                        irq,
+                        interrupt_status,
+                        running,
+                    );
                 })
                 .expect("failed to spawn net-rx thread"),
         );
@@ -883,9 +897,11 @@ impl VirtioBackend for NetBackend {
 
     fn reset(&mut self) {
         self.rx_running.store(false, Ordering::Release);
+        let _ = self.shutdown_evt.write(1);
         if let Some(h) = self.rx_thread.take() {
             let _ = h.join();
         }
+        let _ = self.shutdown_evt.read(); // drain for the next activate
     }
 }
 
@@ -896,8 +912,10 @@ impl Drop for NetBackend {
 }
 
 /// RX loop: poll socketpair → push frames into guest RX queue → inject interrupt.
+#[allow(clippy::too_many_arguments)]
 fn net_rx_loop(
     fd: RawFd,
+    shutdown_fd: RawFd,
     mem: GuestMemoryMmap,
     rx_q: VirtioQueueState,
     vm_fd: Arc<VmFd>,
@@ -910,14 +928,21 @@ fn net_rx_loop(
     let mut buf = vec![0u8; 65535];
 
     while running.load(Ordering::Acquire) {
-        let mut pfd = libc::pollfd {
-            fd,
-            events: libc::POLLIN,
-            revents: 0,
-        };
-        let ret = unsafe { libc::poll(&mut pfd, 1, 100) };
-        if ret <= 0 {
-            continue;
+        let mut pfds = [
+            libc::pollfd {
+                fd,
+                events: libc::POLLIN,
+                revents: 0,
+            },
+            libc::pollfd {
+                fd: shutdown_fd,
+                events: libc::POLLIN,
+                revents: 0,
+            },
+        ];
+        let ret = unsafe { libc::poll(pfds.as_mut_ptr(), 2, 100) };
+        if ret <= 0 || pfds[0].revents & libc::POLLIN == 0 {
+            continue; // timeout, or the shutdown eventfd woke us
         }
 
         let n = unsafe { libc::recv(fd, buf.as_mut_ptr() as *mut _, buf.len(), 0) };
@@ -971,6 +996,9 @@ pub struct VhostVsockBackend {
     call_evts: Vec<EventFd>,
     irq_running: Arc<AtomicBool>,
     irq_thread: Option<std::thread::JoinHandle<()>>,
+    /// Wakes the irq thread out of poll() so reset() joins immediately
+    /// instead of waiting out the poll timeout.
+    shutdown_evt: EventFd,
 }
 
 impl VhostVsockBackend {
@@ -982,6 +1010,7 @@ impl VhostVsockBackend {
             call_evts: Vec::new(),
             irq_running: Arc::new(AtomicBool::new(false)),
             irq_thread: None,
+            shutdown_evt: EventFd::new(0).expect("eventfd"),
         }
     }
 }
@@ -1231,6 +1260,7 @@ impl VirtioBackend for VhostVsockBackend {
             let vm_fd_clone = vm_fd.clone();
             let call_fd_0 = self.call_evts.get(0).map(|e| e.as_raw_fd()).unwrap_or(-1);
             let call_fd_1 = self.call_evts.get(1).map(|e| e.as_raw_fd()).unwrap_or(-1);
+            let shutdown_fd = self.shutdown_evt.as_raw_fd();
             self.irq_thread = std::thread::Builder::new()
                 .name("vsock-irq".into())
                 .spawn(move || {
@@ -1245,11 +1275,16 @@ impl VirtioBackend for VhostVsockBackend {
                             events: libc::POLLIN,
                             revents: 0,
                         },
+                        libc::pollfd {
+                            fd: shutdown_fd,
+                            events: libc::POLLIN,
+                            revents: 0,
+                        },
                     ];
                     while irq_running.load(Ordering::Acquire) {
-                        let ret = libc::poll(pfds.as_mut_ptr(), 2, 500);
+                        let ret = libc::poll(pfds.as_mut_ptr(), 3, 500);
                         if ret > 0 {
-                            for pfd in &mut pfds {
+                            for pfd in &mut pfds[..2] {
                                 if pfd.revents & (libc::POLLIN | libc::POLLNVAL) == libc::POLLIN {
                                     let mut val: u64 = 0;
                                     libc::read(pfd.fd, &mut val as *mut _ as *mut libc::c_void, 8);
@@ -1257,6 +1292,8 @@ impl VirtioBackend for VhostVsockBackend {
                                     let _ = vm_fd_clone.set_irq_line(irq, true);
                                 }
                             }
+                            // shutdown_evt readable → the flag flipped;
+                            // the loop condition exits on the next check.
                         }
                     }
                 })
@@ -1280,9 +1317,11 @@ impl VirtioBackend for VhostVsockBackend {
 
     fn reset(&mut self) {
         self.irq_running.store(false, Ordering::Release);
+        let _ = self.shutdown_evt.write(1);
         if let Some(h) = self.irq_thread.take() {
             let _ = h.join();
         }
+        let _ = self.shutdown_evt.read(); // drain for the next activate
         self.kick_evts.clear();
         self.call_evts.clear();
         if let Some(fd) = self.vhost_fd.take() {
