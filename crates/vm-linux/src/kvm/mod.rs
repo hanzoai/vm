@@ -28,7 +28,9 @@ use kvm_bindings::{KVM_DEV_ARM_VGIC_GRP_ADDR, KVM_DEV_ARM_VGIC_GRP_CTRL};
 pub struct KvmVm {
     #[allow(dead_code)]
     pub kvm: Kvm,
+    #[allow(dead_code)]
     pub vm_fd: Arc<VmFd>,
+    #[allow(dead_code)]
     pub mem: GuestMemoryMmap,
     pub bus: Arc<Mutex<MmioBus>>,
     pub vcpus: Vec<VcpuFd>,
@@ -551,7 +553,7 @@ fn vcpu_run_loop(mut vcpu: VcpuFd, bus: Arc<Mutex<MmioBus>>, running: Arc<Atomic
     // Install empty handler for SIGRTMIN so KVM_RUN returns EINTR on stop
     unsafe {
         let mut sa: libc::sigaction = std::mem::zeroed();
-        sa.sa_sigaction = empty_signal_handler as usize;
+        sa.sa_sigaction = empty_signal_handler as *const () as usize;
         sa.sa_flags = libc::SA_SIGINFO;
         libc::sigaction(libc::SIGRTMIN(), &sa, std::ptr::null_mut());
     }

@@ -192,8 +192,8 @@ impl StdinRelay {
                 return StdinEvent::Shutdown;
             }
 
-            for i in 0..n as usize {
-                match events[i].u64 {
+            for ev in &events[..n as usize] {
+                match ev.u64 {
                     EV_STDIN => return StdinEvent::Ready,
                     EV_PIPE => return StdinEvent::Shutdown,
                     EV_SIGNAL => {

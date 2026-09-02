@@ -184,6 +184,9 @@ mod guest {
         Ok(())
     }
 
+    // ifr_name is c_char: unsigned on aarch64 (cast is a no-op there),
+    // signed on x86_64 (cast is required). Keep the cast for both arches.
+    #[allow(clippy::unnecessary_cast)]
     fn bring_up_interface(sock: i32, name: &[u8]) {
         unsafe {
             let mut ifr: libc::ifreq = std::mem::zeroed();

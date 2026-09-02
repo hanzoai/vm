@@ -3,7 +3,7 @@ use std::io::{BufReader, Read, Write};
 use std::net::TcpStream;
 use std::sync::Arc;
 
-use anyhow::{bail, Context, Result};
+use anyhow::{bail, Result};
 use tokio::sync::{mpsc, oneshot};
 use tracing::info;
 
@@ -712,6 +712,7 @@ extern "C" {
 
 #[cfg(target_os = "macos")]
 fn clone_file_cow(src: &str, dst: &str) -> Result<()> {
+    use anyhow::Context as _;
     let c_src = std::ffi::CString::new(src).context("invalid source path")?;
     let c_dst = std::ffi::CString::new(dst).context("invalid destination path")?;
     let ret = unsafe { clonefile(c_src.as_ptr(), c_dst.as_ptr(), 0) };
