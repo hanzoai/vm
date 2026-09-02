@@ -8,6 +8,9 @@ CONFIG_ARM64=y
 CONFIG_ARCH_VIRT=y
 CONFIG_SMP=y
 CONFIG_NR_CPUS=16
+# DEFERRED_STRUCT_PAGE_INIT measured as a wash here (VZ and KVM, 2 GB
+# guests): the deferred pass costs what the serial pass saved. x86 keeps
+# it because cloud-hypervisor guests measurably win.
 
 # No loadable modules
 # CONFIG_MODULES is not set
