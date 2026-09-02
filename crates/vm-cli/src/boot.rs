@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-#[cfg(target_os = "macos")]
 use std::ffi::CString;
 use std::io::IsTerminal;
 
@@ -71,7 +70,15 @@ pub(crate) struct PreparedVm {
     pub mounts: Vec<MountConfig>,
 }
 
-pub(crate) fn prepare_vm(vm: &VmArgs, cfg: &Config, from: Option<&str>) -> Result<PreparedVm> {
+/// Prepare a VM instance. `discard` marks a throwaway disk (plain `run`):
+/// it is unlinked while the VM holds it open, never read back, and on Linux
+/// may live on tmpfs when the data dir cannot reflink.
+pub(crate) fn prepare_vm(
+    vm: &VmArgs,
+    cfg: &Config,
+    from: Option<&str>,
+    discard: bool,
+) -> Result<PreparedVm> {
     trace_boot("prepare_vm start");
     let cpus = vm.cpus.or(cfg.cpus).unwrap_or(2);
     let memory = vm.memory.or(cfg.memory).unwrap_or(2048);
@@ -218,7 +225,7 @@ pub(crate) fn prepare_vm(vm: &VmArgs, cfg: &Config, from: Option<&str>) -> Resul
     let instance_dir = format!("{}/instances/{}", data_dir, std::process::id());
     let _ = std::fs::remove_dir_all(&instance_dir);
     std::fs::create_dir_all(&instance_dir)?;
-    let work_rootfs = format!("{}/rootfs.ext4", instance_dir);
+    let mut work_rootfs = format!("{}/rootfs.ext4", instance_dir);
     trace_boot("prepare: instance dir ready");
 
     // CAS checkpoints don't need a file copy — the NBD server reads from the chunk store.
@@ -228,7 +235,7 @@ pub(crate) fn prepare_vm(vm: &VmArgs, cfg: &Config, from: Option<&str>) -> Resul
         if verbose {
             eprintln!("hanzo-vm: creating working copy...");
         }
-        clone_file(&source, &work_rootfs)?;
+        clone_rootfs(&source, &mut work_rootfs, discard, disk_size * 1024 * 1024)?;
         // The clone is a fresh vnode: its pages are cold even when the source
         // is cached, and the guest's root mount pays for that in disk reads.
         // Warm it sequentially while the VM is being configured and started.
@@ -275,11 +282,69 @@ pub(crate) fn prepare_vm(vm: &VmArgs, cfg: &Config, from: Option<&str>) -> Resul
         disk_size,
         proxy_config,
         sync_before_stop: false,
-        discard_disk: false,
+        discard_disk: discard,
         verbose,
         forwards,
         mounts,
     })
+}
+
+/// Clone the base image to the working copy. macOS: APFS clonefile,
+/// always free. (`&mut String` matches the Linux variant, which may point
+/// the working copy at tmpfs.)
+#[cfg(target_os = "macos")]
+#[allow(clippy::ptr_arg)]
+fn clone_rootfs(source: &str, work_rootfs: &mut String, _discard: bool, _bytes: u64) -> Result<()> {
+    clone_file(source, work_rootfs)
+}
+
+/// Clone the base image to the working copy. Reflink when the filesystem
+/// offers it (XFS/btrfs). Otherwise a throwaway disk goes to tmpfs when it
+/// fits: the sparse copy runs at page-cache speed, nothing is ever written
+/// back to storage, and teardown frees pages instead of evicting hundreds
+/// of MB of freshly written ext4 extents — on ext4 data dirs this is the
+/// difference between a steady 0.4 s boot and multi-second writeback
+/// stalls. Disks that are read back after the VM stops (checkpoint
+/// creation, stdio mode) stay in the instance dir.
+#[cfg(target_os = "linux")]
+fn clone_rootfs(source: &str, work_rootfs: &mut String, discard: bool, bytes: u64) -> Result<()> {
+    if vm::reflink_file(source, work_rootfs).is_ok() {
+        return Ok(());
+    }
+    if discard {
+        if let Some(path) = tmpfs_work_path(bytes) {
+            if clone_file(source, &path).is_ok() {
+                *work_rootfs = path;
+                return Ok(());
+            }
+            let _ = std::fs::remove_file(&path);
+        }
+    }
+    clone_file(source, work_rootfs)
+}
+
+/// A per-pid path on /dev/shm, only when the tmpfs has room for the full
+/// disk. `prune` sweeps leftovers of crashed runs.
+#[cfg(target_os = "linux")]
+fn tmpfs_work_path(bytes: u64) -> Option<String> {
+    let dir = "/dev/shm/hanzo-vm";
+    std::fs::create_dir_all(dir).ok()?;
+    let stat = nix_statvfs(dir)?;
+    if stat < bytes {
+        return None;
+    }
+    Some(format!("{}/{}.ext4", dir, std::process::id()))
+}
+
+/// Available bytes on the filesystem holding `path`.
+#[cfg(target_os = "linux")]
+fn nix_statvfs(path: &str) -> Option<u64> {
+    let c_path = CString::new(path).ok()?;
+    let mut st: libc::statvfs = unsafe { std::mem::zeroed() };
+    if unsafe { libc::statvfs(c_path.as_ptr(), &mut st) } != 0 {
+        return None;
+    }
+    Some(st.f_bavail as u64 * st.f_frsize as u64)
 }
 
 pub(crate) fn build_sandbox(

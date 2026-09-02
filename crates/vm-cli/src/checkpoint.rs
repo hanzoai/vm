@@ -31,7 +31,7 @@ pub(crate) fn create(
         bail!("checkpoint '{}' already exists, delete it first", name);
     }
 
-    let mut prepared = boot::prepare_vm(vm_args, &cfg, from)?;
+    let mut prepared = boot::prepare_vm(vm_args, &cfg, from, false)?;
     prepared.sync_before_stop = true;
     let result = boot::run_command(&prepared, &command)?;
 
