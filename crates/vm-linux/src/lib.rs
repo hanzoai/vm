@@ -27,3 +27,6 @@ pub use storage::{
     StorageAttachment, StorageDevice, VirtioBlockDevice,
 };
 pub use vm::{VirtualMachine, VmState};
+
+/// Kernel console device name for this backend (PL011 UART).
+pub const CONSOLE_DEVICE: &str = "ttyAMA0";

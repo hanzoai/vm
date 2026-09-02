@@ -145,31 +145,36 @@ impl VmConfigBuilder {
         // mitigations=off: the guest is disposable and holds no secrets
         // (the proxy substitutes secret placeholders host-side), so CPU
         // vulnerability mitigations inside it buy nothing and cost cycles.
+        // A console is only named when something reads it — registering
+        // one costs the kernel a device probe plus the log replay, and a
+        // plain exec run has nowhere to show it (dmesg still works).
+        let base = "root=/dev/vda rw init=/usr/bin/vm-guest mitigations=off printk.time=1";
         let cmdline = if self.verbose {
-            "console=hvc0 root=/dev/vda rw init=/usr/bin/vm-guest mitigations=off printk.time=1"
+            format!("console={} {}", CONSOLE_DEVICE, base)
+        } else if self.console {
+            format!("console={} {} quiet", CONSOLE_DEVICE, base)
         } else {
-            "console=hvc0 root=/dev/vda rw init=/usr/bin/vm-guest quiet mitigations=off printk.time=1"
+            format!("{} quiet", base)
         };
-        boot_loader.set_command_line(cmdline);
+        boot_loader.set_command_line(&cmdline);
 
         let memory_bytes = self.memory_mb * 1024 * 1024;
         let config = VirtualMachineConfiguration::new(&boot_loader, self.cpus, memory_bytes);
 
-        let dev_null; // keep the File alive so the fd stays valid
-        let serial_attachment = if self.console {
-            FileHandleSerialAttachment::new(
-                std::io::stdin().as_raw_fd(),
-                std::io::stdout().as_raw_fd(),
-            )
-        } else if self.verbose {
-            FileHandleSerialAttachment::new_write_only(std::io::stderr().as_raw_fd())
-        } else {
-            dev_null = std::fs::File::open("/dev/null")
-                .map_err(|e| anyhow::anyhow!("failed to open /dev/null: {}", e))?;
-            FileHandleSerialAttachment::new_write_only(dev_null.as_raw_fd())
-        };
-        let serial = VirtioConsoleSerialPort::new_with_attachment(&serial_attachment);
-        config.set_serial_ports(&[serial]);
+        // No console named on the cmdline means no serial port needed:
+        // skipping the device saves its probe during guest boot.
+        if self.console || self.verbose {
+            let serial_attachment = if self.console {
+                FileHandleSerialAttachment::new(
+                    std::io::stdin().as_raw_fd(),
+                    std::io::stdout().as_raw_fd(),
+                )
+            } else {
+                FileHandleSerialAttachment::new_write_only(std::io::stderr().as_raw_fd())
+            };
+            let serial = VirtioConsoleSerialPort::new_with_attachment(&serial_attachment);
+            config.set_serial_ports(&[serial]);
+        }
 
         let nbd_attachment;
         let disk_attachment;
@@ -925,7 +930,10 @@ impl Sandbox {
                         );
                     }
                     tracing::debug!("vsock connect attempt {} failed: {}", attempt, e);
-                    std::thread::sleep(Duration::from_millis(10));
+                    // Fine-grained polling while the guest is expected any
+                    // millisecond now; back off once it is clearly slow.
+                    let interval = if attempt < 100 { 1 } else { 10 };
+                    std::thread::sleep(Duration::from_millis(interval));
                 }
             }
         }

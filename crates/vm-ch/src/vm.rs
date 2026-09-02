@@ -94,17 +94,11 @@ impl VirtualMachine {
         let serial_out = inner.serial_write_fd.and_then(dup_owned);
         let (state_tx, state_rx) = bounded(1);
 
-        // Sockets live next to the disk (the per-instance directory), or in
-        // a private temp directory when there is no disk.
-        let run_dir = inner
-            .disk_path
-            .as_deref()
-            .and_then(|p| Path::new(p).parent())
-            .filter(|p| !p.as_os_str().is_empty())
-            .map(Path::to_path_buf)
-            .unwrap_or_else(|| {
-                std::env::temp_dir().join(format!("hanzo-vm-{}", std::process::id()))
-            });
+        // Sockets live in a private per-pid directory, removed on drop.
+        // Never next to the disk: a throwaway disk may sit in a directory
+        // shared between instances (tmpfs), and colliding API sockets stop
+        // cloud-hypervisor from starting at all.
+        let run_dir = std::env::temp_dir().join(format!("hanzo-vm-{}", std::process::id()));
         let _ = std::fs::create_dir_all(&run_dir);
 
         let api_socket = run_dir.join("ch-api.sock").to_string_lossy().into_owned();
@@ -250,13 +244,16 @@ impl VirtualMachine {
             "serial": { "mode": "Off" },
             "rng": { "src": "/dev/urandom" },
         });
-        // Interactive consoles need Tty for input; otherwise write console
+        // Interactive consoles need Tty for input; verbose writes console
         // output through the child's own stdout (Tty mode EBADFs on a
-        // non-terminal stdout).
+        // non-terminal stdout). With no serial port configured the console
+        // device is off entirely.
         cfg["console"] = if c.serial_read_fd.is_some() {
             serde_json::json!({ "mode": "Tty" })
-        } else {
+        } else if c.serial_write_fd.is_some() {
             serde_json::json!({ "mode": "File", "file": "/proc/self/fd/1" })
+        } else {
+            serde_json::json!({ "mode": "Off" })
         };
         if let Some(ref initrd) = c.initrd_path {
             cfg["payload"]["initramfs"] = serde_json::json!(initrd);
@@ -418,5 +415,6 @@ impl Drop for VirtualMachine {
             let _ = child.kill();
             let _ = child.wait();
         }
+        let _ = std::fs::remove_dir_all(&self.run_dir);
     }
 }
