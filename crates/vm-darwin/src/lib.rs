@@ -27,3 +27,6 @@ pub use storage::{
     StorageAttachment, StorageDevice, VirtioBlockDevice,
 };
 pub use vm::{VirtualMachine, VmState};
+
+/// Kernel console device name for this backend (virtio console).
+pub const CONSOLE_DEVICE: &str = "hvc0";
