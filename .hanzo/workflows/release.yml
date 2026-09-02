@@ -1,9 +1,10 @@
-# A v* tag builds the CLI (macOS arm64, Linux arm64) and the guest image
-# (kernel, initramfs, rootfs with vm-guest) and attaches them to the GitHub
-# release the CLI downloads from (crates/vm-cli/src/assets.rs). Asset names:
+# A v* tag builds the CLI (macOS arm64, Linux arm64 and x86_64) and the guest
+# image per architecture (kernel, initramfs, rootfs with vm-guest) and attaches
+# them to the GitHub release the CLI downloads from (crates/vm-cli/src/assets.rs).
+# Asset names:
 #   hanzo-vm-<tag>-darwin-aarch64.tar.gz   hanzo-vm binary
-#   hanzo-vm-<tag>-linux-aarch64.tar.gz    hanzo-vm binary
-#   hanzo-vm-os-<tag>-aarch64.tar.gz       Image, initramfs.cpio.gz, rootfs.ext4
+#   hanzo-vm-<tag>-linux-<arch>.tar.gz     hanzo-vm binary (aarch64, x86_64)
+#   hanzo-vm-os-<tag>-<arch>.tar.gz        Image, initramfs.cpio.gz, rootfs.ext4
 # Uploads use gh with the runner's GITHUB_TOKEN, as hanzoai/engine does.
 name: release
 on:
@@ -41,7 +42,14 @@ jobs:
           gh release upload "$TAG" "hanzo-vm-${TAG}-darwin-aarch64.tar.gz" --clobber
 
   cli-linux:
-    runs-on: hanzo-build-linux-arm64
+    strategy:
+      matrix:
+        include:
+          - runner: hanzo-build-linux-arm64
+            arch: aarch64
+          - runner: hanzo-build-linux-amd64
+            arch: x86_64
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
@@ -49,13 +57,22 @@ jobs:
           ref: ${{ inputs.tag || github.ref }}
       - uses: dtolnay/rust-toolchain@stable
       - run: cargo build --release -p hanzo-vm
-      - run: tar czf "hanzo-vm-${TAG}-linux-aarch64.tar.gz" -C target/release hanzo-vm
+      - run: tar czf "hanzo-vm-${TAG}-linux-${{ matrix.arch }}.tar.gz" -C target/release hanzo-vm
       - run: |
           gh release create "$TAG" --title "$TAG" --notes "Release $TAG" 2>/dev/null || true
-          gh release upload "$TAG" "hanzo-vm-${TAG}-linux-aarch64.tar.gz" --clobber
+          gh release upload "$TAG" "hanzo-vm-${TAG}-linux-${{ matrix.arch }}.tar.gz" --clobber
 
   os:
-    runs-on: hanzo-build-linux-arm64
+    strategy:
+      matrix:
+        include:
+          - runner: hanzo-build-linux-arm64
+            arch: aarch64
+            target: aarch64-unknown-linux-musl
+          - runner: hanzo-build-linux-amd64
+            arch: x86_64
+            target: x86_64-unknown-linux-musl
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 180
     steps:
       - uses: actions/checkout@v4
@@ -63,20 +80,23 @@ jobs:
           ref: ${{ inputs.tag || github.ref }}
       - uses: dtolnay/rust-toolchain@stable
         with:
-          targets: aarch64-unknown-linux-musl
+          targets: ${{ matrix.target }}
       - run: |
           sudo apt-get update -qq
           sudo apt-get install -y -qq musl-tools debootstrap e2fsprogs busybox-static pax-utils cpio \
             build-essential bc flex bison libelf-dev libssl-dev curl xz-utils
-      - run: cargo build -p vm-guest --target aarch64-unknown-linux-musl --release
+      - run: cargo build -p vm-guest --target ${{ matrix.target }} --release
         env:
           CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER: musl-gcc
+          CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_LINKER: musl-gcc
+      # prepare-rootfs.sh and build-kernel.sh pick the arch from uname -m,
+      # which matches the runner.
       - run: ./scripts/prepare-rootfs.sh
         env:
           HANZO_VM_HOME: ${{ github.workspace }}/os
       # --sparse: rootfs.ext4 is a mostly-empty 4GB image; the GNU sparse
       # entries let the tar crate in assets.rs restore the holes on extract.
-      - run: tar --format=gnu --sparse -czf "hanzo-vm-os-${TAG}-aarch64.tar.gz" -C os Image initramfs.cpio.gz rootfs.ext4
+      - run: tar --format=gnu --sparse -czf "hanzo-vm-os-${TAG}-${{ matrix.arch }}.tar.gz" -C os Image initramfs.cpio.gz rootfs.ext4
       - run: |
           gh release create "$TAG" --title "$TAG" --notes "Release $TAG" 2>/dev/null || true
-          gh release upload "$TAG" "hanzo-vm-os-${TAG}-aarch64.tar.gz" --clobber
+          gh release upload "$TAG" "hanzo-vm-os-${TAG}-${{ matrix.arch }}.tar.gz" --clobber
