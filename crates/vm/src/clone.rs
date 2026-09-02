@@ -30,6 +30,20 @@ pub fn clone_file(src: &str, dst: &str) -> Result<()> {
     Ok(())
 }
 
+/// Reflink `src` to `dst` (FICLONE), no fallback. Fails on filesystems
+/// without reflink (ext4, tmpfs) and across filesystems (EXDEV); the
+/// caller decides where the working copy should live in that case.
+pub fn reflink_file(src: &str, dst: &str) -> io::Result<()> {
+    let sf = File::open(src)?;
+    let df = File::create(dst)?;
+    let r = reflink(&sf, &df);
+    if r.is_err() {
+        drop(df);
+        let _ = std::fs::remove_file(dst);
+    }
+    r
+}
+
 fn reflink(src: &File, dst: &File) -> io::Result<()> {
     // EOPNOTSUPP on ext4/tmpfs; the caller falls through to sparse_copy.
     let ret = unsafe { libc::ioctl(dst.as_raw_fd(), libc::FICLONE, src.as_raw_fd()) };
@@ -44,6 +58,10 @@ fn sparse_copy(src: &File, dst: &File) -> io::Result<()> {
     let len = src.metadata()?.len();
     dst.set_len(len)?;
     let (sfd, dfd) = (src.as_raw_fd(), dst.as_raw_fd());
+    // copy_file_range refuses cross-filesystem copies (EXDEV, kernels
+    // >= 5.19); pread/pwrite covers that at page-cache speed.
+    let mut use_rw = false;
+    let mut buf = Vec::new();
     let mut off: i64 = 0;
     while (off as u64) < len {
         let data = unsafe { libc::lseek(sfd, off, libc::SEEK_DATA) };
@@ -60,12 +78,48 @@ fn sparse_copy(src: &File, dst: &File) -> io::Result<()> {
         }
         let mut pos = data;
         while pos < end {
+            if use_rw {
+                if buf.is_empty() {
+                    buf = vec![0u8; 1 << 20];
+                }
+                let want = ((end - pos) as usize).min(buf.len());
+                let n =
+                    unsafe { libc::pread(sfd, buf.as_mut_ptr() as *mut libc::c_void, want, pos) };
+                if n <= 0 {
+                    return Err(io::Error::last_os_error());
+                }
+                let n = n as i64;
+                let mut written: i64 = 0;
+                while written < n {
+                    let w = unsafe {
+                        libc::pwrite(
+                            dfd,
+                            buf.as_ptr().add(written as usize) as *const libc::c_void,
+                            (n - written) as usize,
+                            pos + written,
+                        )
+                    };
+                    if w <= 0 {
+                        return Err(io::Error::last_os_error());
+                    }
+                    written += w as i64;
+                }
+                pos += n;
+                continue;
+            }
             let (mut s_off, mut d_off) = (pos, pos);
             let n = unsafe {
                 libc::copy_file_range(sfd, &mut s_off, dfd, &mut d_off, (end - pos) as usize, 0)
             };
             if n < 0 {
-                return Err(io::Error::last_os_error());
+                let err = io::Error::last_os_error();
+                match err.raw_os_error() {
+                    Some(libc::EXDEV) | Some(libc::EINVAL) | Some(libc::ENOSYS) => {
+                        use_rw = true;
+                        continue;
+                    }
+                    _ => return Err(err),
+                }
             }
             if n == 0 {
                 return Err(io::Error::new(
@@ -118,6 +172,41 @@ mod tests {
             meta.len()
         );
 
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn clone_across_filesystems_stays_sparse() {
+        // ext4 -> tmpfs: copy_file_range returns EXDEV on kernels >= 5.19,
+        // so this exercises the pread/pwrite fallback.
+        if !std::path::Path::new("/dev/shm").is_dir() {
+            return;
+        }
+        let dir = std::env::temp_dir().join(format!("vm-clone-x-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let src = dir.join("src.img");
+        let dst = format!("/dev/shm/vm-clone-x-{}.img", std::process::id());
+
+        let mut f = File::create(&src).unwrap();
+        f.write_all(b"head data").unwrap();
+        f.seek(SeekFrom::Start(HOLE)).unwrap();
+        f.write_all(b"tail data").unwrap();
+        f.set_len(HOLE + 4096).unwrap();
+        drop(f);
+
+        clone_file(src.to_str().unwrap(), &dst).unwrap();
+
+        assert_eq!(std::fs::read(&src).unwrap(), std::fs::read(&dst).unwrap());
+        let meta = std::fs::metadata(&dst).unwrap();
+        assert_eq!(meta.len(), HOLE + 4096);
+        let allocated = meta.blocks() * 512;
+        assert!(
+            allocated < 1024 * 1024,
+            "destination materialized holes: {} bytes allocated",
+            allocated
+        );
+
+        std::fs::remove_file(&dst).unwrap();
         std::fs::remove_dir_all(&dir).unwrap();
     }
 }
