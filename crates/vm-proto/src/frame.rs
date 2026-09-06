@@ -53,6 +53,13 @@ pub const DISCARD_RESP: u8 = 0x4F;
 pub const DOWNLOAD_REQ: u8 = 0x50;
 pub const DOWNLOAD_PROGRESS: u8 = 0x51;
 
+// Attestation. The request payload is 64 raw bytes and nothing else — the
+// figure a hardware report is taken over. It carries no structure because the
+// guest gives it none: it hands the bytes to the platform and hands back what
+// the platform said. The response is a JSON `vm_measure::attest::Status`.
+pub const ATTEST_REQ: u8 = 0x60;
+pub const ATTEST_RESP: u8 = 0x61;
+
 const MAX_FRAME: u32 = 1 << 20; // 1 MB
 
 /// Write a binary frame: `[u32 BE length][u8 type][payload]`.

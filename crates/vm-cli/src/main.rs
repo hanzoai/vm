@@ -3,6 +3,7 @@ mod boot;
 mod checkpoint;
 mod cli;
 mod config;
+mod measure;
 mod stdio;
 
 use std::process;
@@ -44,10 +45,21 @@ fn main() -> Result<()> {
                 vec!["/bin/sh".to_string()]
             };
 
-            let prepared = boot::prepare_vm(&vm, &cfg, from.as_deref(), !stdio && !console)?;
+            let plan = boot::plan(&vm, &cfg, from.as_deref())?;
+            // What is about to be booted, stated before it is. Taken here,
+            // where the source images are still the only thing that exists,
+            // and only where something reads it: the stdio wire reports it to
+            // whatever is driving the vm. A command run in a vm and thrown
+            // away has nobody to tell.
+            let launch = if stdio {
+                Some(measure::launch(&plan, console, &mut measure::cache(false))?)
+            } else {
+                None
+            };
+            let prepared = boot::prepare_vm(plan, !stdio && !console)?;
 
-            let result = if stdio {
-                stdio::run_stdio(&prepared)
+            let result = if let Some(launch) = &launch {
+                stdio::run_stdio(&prepared, launch)
             } else if console {
                 run_console(&prepared)
             } else {
@@ -60,6 +72,16 @@ fn main() -> Result<()> {
             let _ = std::fs::remove_dir_all(&prepared.instance_dir);
             boot::trace_boot("instance dir removed");
             process::exit(result?);
+        }
+        Commands::Measure {
+            vm,
+            from,
+            recompute,
+        } => {
+            let cfg = load_config(vm.config.as_deref())?;
+            let plan = boot::plan(&vm, &cfg, from.as_deref())?;
+            let mut cache = measure::cache(recompute);
+            println!("{}", measure::document(&plan, false, &mut cache)?);
         }
         Commands::Init { force } => {
             let data_dir = default_data_dir();

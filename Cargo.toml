@@ -11,6 +11,7 @@ members = [
     "crates/vm",
     "crates/vm-store",
     "crates/vm-guest",
+    "crates/vm-measure",
 ]
 # vm-darwin and vm-linux are platform-specific — only pulled in
 # transitively via vm's cfg'd deps. Excluded from default builds
@@ -23,6 +24,7 @@ default-members = [
     "crates/vm",
     "crates/vm-store",
     "crates/vm-guest",
+    "crates/vm-measure",
 ]
 
 [profile.release]

@@ -1,6 +1,6 @@
 [package]
 name = "vm-guest"
-version = "2.0.0"
+version = "2.0.1"
 edition = "2021"
 description = "Guest init (PID 1) for Hanzo VM microVMs: mounts, vsock exec/fs/forward server"
 license = "Apache-2.0"
@@ -11,7 +11,8 @@ name = "vm-guest"
 path = "src/main.rs"
 
 [dependencies]
-vm-proto = { version = "2.0.0", path = "../vm-proto" }
+vm-proto = { version = "2.0.1", path = "../vm-proto" }
+vm-measure = { version = "2.0.1", path = "../vm-measure" }
 libc = "0.2"
 serde_json = "1"
 ureq = { version = "3", default-features = false, features = ["rustls"] }

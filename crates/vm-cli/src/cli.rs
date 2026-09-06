@@ -100,6 +100,21 @@ pub(crate) enum Commands {
         command: Vec<String>,
     },
 
+    /// Print what a boot would be: the measurement of its kernel, command
+    /// line, root image and shape, without booting anything
+    Measure {
+        #[command(flatten)]
+        vm: VmArgs,
+
+        /// Measure a named checkpoint instead of the base image
+        #[arg(long)]
+        from: Option<String>,
+
+        /// Read every image again instead of trusting remembered digests
+        #[arg(long)]
+        recompute: bool,
+    },
+
     /// Download or update OS image assets
     Init {
         /// Force re-download even if assets exist

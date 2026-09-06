@@ -1,6 +1,6 @@
 [package]
 name = "vm-proto"
-version = "2.0.0"
+version = "2.0.1"
 edition = "2021"
 description = "Shared wire protocol for Hanzo VM host/guest communication"
 license = "Apache-2.0"

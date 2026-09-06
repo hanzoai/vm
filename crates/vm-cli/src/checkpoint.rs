@@ -7,6 +7,7 @@ use vm::default_data_dir;
 use crate::boot;
 use crate::cli::VmArgs;
 use crate::config::load_config;
+use crate::measure;
 
 pub(crate) fn create(
     name: String,
@@ -31,20 +32,25 @@ pub(crate) fn create(
         bail!("checkpoint '{}' already exists, delete it first", name);
     }
 
-    let mut prepared = boot::prepare_vm(vm_args, &cfg, from, false)?;
+    let mut prepared = boot::prepare_vm(boot::plan(vm_args, &cfg, from)?, false)?;
     prepared.sync_before_stop = true;
     let result = boot::run_command(&prepared, &command)?;
 
     std::fs::create_dir_all(&checkpoints_dir)?;
     eprintln!("hanzo-vm: saving checkpoint '{}'...", name);
 
-    if let Some(ref nbd_handle) = result.nbd_handle {
+    let saved = if let Some(ref nbd_handle) = result.nbd_handle {
         let index_path = format!("{}/{}.idx", checkpoints_dir, name);
         nbd_handle.save_checkpoint(&index_path)?;
+        index_path
     } else {
         let ext4_path = format!("{}/{}.ext4", checkpoints_dir, name);
         boot::clone_file(&prepared.work_rootfs, &ext4_path)?;
-    }
+        ext4_path
+    };
+    // Measure it here, where the slow path has already been paid, so the boots
+    // that start from it read a digest instead of gigabytes.
+    measure::warm(&saved);
     eprintln!("hanzo-vm: checkpoint '{}' saved", name);
 
     drop(result.nbd_handle);

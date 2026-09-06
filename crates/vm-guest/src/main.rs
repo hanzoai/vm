@@ -609,6 +609,22 @@ mod guest {
                     };
                     handle_download(&req, &mut writer);
                 }
+                frame::ATTEST_REQ => {
+                    // 64 bytes, no more and no fewer: the payload IS the field a
+                    // report is taken over, so a short one would be padded by
+                    // the driver and a long one truncated — either way the
+                    // report would answer for bytes nobody chose.
+                    let Ok(bind) = <[u8; 64]>::try_from(payload.as_slice()) else {
+                        let msg = format!("attest takes 64 bytes, got {}", payload.len());
+                        let _ = frame::write_frame(&mut writer, frame::ERROR, msg.as_bytes());
+                        continue;
+                    };
+                    let _ = frame::send_json(
+                        &mut writer,
+                        frame::ATTEST_RESP,
+                        &vm_measure::attest::status(&bind),
+                    );
+                }
                 _ => {} // unknown type, skip
             }
         }

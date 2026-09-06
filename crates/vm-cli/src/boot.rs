@@ -44,10 +44,12 @@ pub(crate) fn trace_boot(label: &str) {
     }
 }
 
-pub(crate) struct PreparedVm {
-    pub instance_dir: String,
+/// What a launch IS: everything the hypervisor will be handed, decided before
+/// anything is copied. Separated from [`PreparedVm`] because a launch can be
+/// stated without being performed — `hanzo-vm measure` prints one, and the
+/// measurement it prints has to be of the same inputs a boot would use.
+pub(crate) struct Plan {
     pub source_rootfs: String,
-    pub work_rootfs: String,
     /// If restoring from a CAS checkpoint, the index path.
     pub cas_index: Option<String>,
     pub kernel_path: String,
@@ -56,6 +58,16 @@ pub(crate) struct PreparedVm {
     pub memory: u64,
     pub disk_size: u64,
     pub proxy_config: Option<vm_proxy::config::ProxyConfig>,
+    pub verbose: bool,
+    pub forwards: Vec<PortMapping>,
+    pub mounts: Vec<MountConfig>,
+}
+
+/// A plan plus the working copy it will write to.
+pub(crate) struct PreparedVm {
+    pub plan: Plan,
+    pub instance_dir: String,
+    pub work_rootfs: String,
     /// Flush guest page cache to disk before stopping. Set for checkpoint
     /// creation, where the disk is cloned after the hard stop and unsynced
     /// writes would silently vanish from the saved image.
@@ -65,21 +77,21 @@ pub(crate) struct PreparedVm {
     /// deletes nothing. Set only by plain `run` — never for checkpoint
     /// creation or stdio mode, which read the disk back after the VM stops.
     pub discard_disk: bool,
-    pub verbose: bool,
-    pub forwards: Vec<PortMapping>,
-    pub mounts: Vec<MountConfig>,
 }
 
-/// Prepare a VM instance. `discard` marks a throwaway disk (plain `run`):
-/// it is unlinked while the VM holds it open, never read back, and on Linux
-/// may live on tmpfs when the data dir cannot reflink.
-pub(crate) fn prepare_vm(
-    vm: &VmArgs,
-    cfg: &Config,
-    from: Option<&str>,
-    discard: bool,
-) -> Result<PreparedVm> {
-    trace_boot("prepare_vm start");
+/// A prepared VM answers for its plan: `prepared.cpus` is the plan's, and
+/// there is no second copy to drift from it.
+impl std::ops::Deref for PreparedVm {
+    type Target = Plan;
+    fn deref(&self) -> &Plan {
+        &self.plan
+    }
+}
+
+/// Resolve a launch: flags over config over defaults, assets downloaded if
+/// missing, the root image chosen. Touches no instance state.
+pub(crate) fn plan(vm: &VmArgs, cfg: &Config, from: Option<&str>) -> Result<Plan> {
+    trace_boot("plan start");
     let cpus = vm.cpus.or(cfg.cpus).unwrap_or(2);
     let memory = vm.memory.or(cfg.memory).unwrap_or(2048);
     let disk_size = vm.disk_size.or(cfg.disk_size).unwrap_or(4096);
@@ -220,7 +232,28 @@ pub(crate) fn prepare_vm(
         }
     };
 
-    trace_boot("prepare: config + assets checked");
+    trace_boot("plan done (config + assets checked)");
+    Ok(Plan {
+        source_rootfs: source,
+        cas_index,
+        kernel_path,
+        initrd_path,
+        cpus,
+        memory,
+        disk_size,
+        proxy_config,
+        verbose,
+        forwards,
+        mounts,
+    })
+}
+
+/// Prepare a VM instance from a plan. `discard` marks a throwaway disk (plain
+/// `run`): it is unlinked while the VM holds it open, never read back, and on
+/// Linux may live on tmpfs when the data dir cannot reflink.
+pub(crate) fn prepare_vm(plan: Plan, discard: bool) -> Result<PreparedVm> {
+    let (verbose, disk_size) = (plan.verbose, plan.disk_size);
+    let data_dir = vm::default_data_dir();
     // Create per-instance working copy (clean any stale dir from PID reuse)
     let instance_dir = format!("{}/instances/{}", data_dir, std::process::id());
     let _ = std::fs::remove_dir_all(&instance_dir);
@@ -231,11 +264,16 @@ pub(crate) fn prepare_vm(
     // CAS checkpoints don't need a file copy — the NBD server reads from the chunk store.
     // We still need a rootfs file for the VM builder (kernel cmdline root=), but it can be
     // a dummy for CAS mode since I/O goes through NBD.
-    if cas_index.is_none() {
+    if plan.cas_index.is_none() {
         if verbose {
             eprintln!("hanzo-vm: creating working copy...");
         }
-        clone_rootfs(&source, &mut work_rootfs, discard, disk_size * 1024 * 1024)?;
+        clone_rootfs(
+            &plan.source_rootfs,
+            &mut work_rootfs,
+            discard,
+            disk_size * 1024 * 1024,
+        )?;
         // The clone is a fresh vnode: its pages are cold even when the source
         // is cached, and the guest's root mount pays for that in disk reads.
         // Warm it sequentially while the VM is being configured and started.
@@ -271,21 +309,11 @@ pub(crate) fn prepare_vm(
 
     trace_boot("prepare_vm done (disk cloned + extended)");
     Ok(PreparedVm {
+        plan,
         instance_dir,
-        source_rootfs: source,
         work_rootfs,
-        cas_index,
-        kernel_path,
-        initrd_path,
-        cpus,
-        memory,
-        disk_size,
-        proxy_config,
         sync_before_stop: false,
         discard_disk: discard,
-        verbose,
-        forwards,
-        mounts,
     })
 }
 

@@ -143,6 +143,46 @@ hanzo-vm checkpoint list
 hanzo-vm checkpoint delete myenv
 ```
 
+### Measurement
+
+`hanzo-vm measure` states what a boot would be — the kernel, the command line
+the kernel is given, the root image and the machine's shape — as SHA-384
+digests folded into one extend-only register:
+
+```text
+e_i     = SHA-384( name_i ‖ 0x00 ‖ SHA-384(content_i) )
+R_0     = 0…0                                   (48 zero bytes)
+R_{i+1} = SHA-384( R_i ‖ e_i )
+```
+
+```sh
+hanzo-vm measure                      # the base image
+hanzo-vm measure --from k3s --cpus 4  # a checkpoint, at the shape it will boot
+hanzo-vm measure --recompute          # read the images again, ignoring cached digests
+```
+
+Only content is hashed; the path a file was read from is printed for the
+reader and never enters a digest, so the same assets measure identically on
+every machine that holds them. A file digest is an ordinary SHA-384 — `shasum
+-a 384 ~/.hanzo/vm/Image` prints the `kernel` event's digest. Digests are
+remembered against each image's device, inode, length and mtime, so a boot
+measures in milliseconds instead of re-reading gigabytes; `--recompute` skips
+the cache.
+
+The fold is the rule Intel TDX applies to a runtime measurement register
+(`RTMR := SHA-384(RTMR ‖ 48 bytes)`), and SHA-384 is the digest both TDX
+registers and the AMD SEV-SNP launch measurement use.
+
+`run --stdio` reports the launch register as a `measurement` notification
+before it says `ready`, so a driver measures what it received rather than
+what it asked for, and can extend a second register with whatever it then
+deploys. `SHA-512(launch ‖ workload)` — the `bind` field — is 64 bytes, the
+width of the caller field in both a SEV-SNP attestation report and a TDX
+TDREPORT; the `attest` method sends those bytes into the guest, which asks
+`/dev/sev-guest` or `/dev/tdx_guest` for a report over them. On hardware
+without either device the answer is `"platform": "none"`, which is what all
+three machines this was built on answer.
+
 ### Secrets
 
 A secret never enters the guest. The guest sees a random placeholder in the

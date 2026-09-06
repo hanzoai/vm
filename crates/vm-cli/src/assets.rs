@@ -76,6 +76,12 @@ fn download_os_image_version(data_dir: &str, version: &str) -> Result<()> {
     let version_file = format!("{}/VERSION", data_dir);
     fs::write(&version_file, format!("{}\n", version)).context("failed to write VERSION file")?;
 
+    // Measure the images while they are fresh on disk, so the first boot from
+    // them reads a digest rather than a gigabyte.
+    for image in ["Image", "rootfs.ext4"] {
+        crate::measure::warm(&format!("{}/{}", data_dir, image));
+    }
+
     eprintln!("hanzo-vm: OS image ready ({})", version);
     Ok(())
 }

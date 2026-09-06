@@ -1,6 +1,6 @@
 [package]
 name = "hanzo-vm"
-version = "2.0.0"
+version = "2.0.1"
 edition = "2021"
 description = "Hanzo microVM CLI: boot a Linux guest, run a command, throw the disk away"
 license = "Apache-2.0"
@@ -15,10 +15,11 @@ path = "src/main.rs"
 tempfile = "3"
 
 [dependencies]
-vm-core = { version = "2.0.0", path = "../vm" }
-vm-proto = { version = "2.0.0", path = "../vm-proto" }
-vm-proxy = { version = "2.0.0", path = "../vm-proxy" }
-vm-store = { version = "2.0.0", path = "../vm-store" }
+vm-core = { version = "2.0.1", path = "../vm" }
+vm-proto = { version = "2.0.1", path = "../vm-proto" }
+vm-proxy = { version = "2.0.1", path = "../vm-proxy" }
+vm-measure = { version = "2.0.1", path = "../vm-measure" }
+vm-store = { version = "2.0.1", path = "../vm-store" }
 blake3 = "1"
 clap = { version = "4", features = ["derive", "env"] }
 anyhow = "1"

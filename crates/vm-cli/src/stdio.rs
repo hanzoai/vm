@@ -29,6 +29,7 @@ mod method {
     pub const RENAME: &str = "rename";
     pub const COPY: &str = "copy";
     pub const CHMOD: &str = "chmod";
+    pub const ATTEST: &str = "attest";
 }
 
 // JSON-RPC 2.0 error codes
@@ -172,6 +173,13 @@ struct CheckpointParams {
     name: String,
 }
 
+/// The 64 bytes a hardware report is taken over, in the hex a measurement
+/// document carries them in — `Measurement::bind_hex`.
+#[derive(Deserialize)]
+struct AttestParams {
+    bind: String,
+}
+
 #[derive(Deserialize)]
 struct MkdirParams {
     path: String,
@@ -311,7 +319,7 @@ fn send_error_shared(
     )
 }
 
-pub(crate) fn run_stdio(prepared: &PreparedVm) -> Result<i32> {
+pub(crate) fn run_stdio(prepared: &PreparedVm, launch: &vm_measure::Log) -> Result<i32> {
     let out: SharedWriter = Arc::new(Mutex::new(io::stdout()));
 
     // Set up proxy networking if --allow-net
@@ -360,6 +368,18 @@ pub(crate) fn run_stdio(prepared: &PreparedVm) -> Result<i32> {
 
     // Event channel: background threads -> main loop
     let (event_tx, event_rx) = std::sync::mpsc::channel::<Event>();
+
+    // What was booted, before anything is said about it running. The driver of
+    // this stdio wire is the one that knows what it then deploys, so it gets
+    // the launch half of the measurement and extends the rest itself.
+    send_json_shared(
+        &out,
+        &JsonRpcNotification {
+            jsonrpc: "2.0",
+            method: "measurement",
+            params: Some(launch),
+        },
+    )?;
 
     // Send ready notification
     send_json_shared(
@@ -711,6 +731,24 @@ pub(crate) fn run_stdio(prepared: &PreparedVm) -> Result<i32> {
                 drop(event_tx);
                 let _ = event_thread.join();
                 return Ok(0);
+            }
+
+            // What the guest's platform will sign for. The bind covers the
+            // whole measurement, so the caller asks once the chain is
+            // complete — the vm has no opinion about when that is.
+            method::ATTEST => {
+                let bind = serde_json::from_value::<AttestParams>(req.params)
+                    .map_err(anyhow::Error::from)
+                    .and_then(|p| vm_measure::Measurement::parse_bind(&p.bind));
+                match bind {
+                    Ok(bind) => match sandbox.attest(&bind) {
+                        Ok(status) => send_result_shared(&out, req.id, status)?,
+                        Err(e) => send_error_shared(&out, req.id, SERVER_ERROR, format!("{e}"))?,
+                    },
+                    Err(e) => {
+                        send_error_shared(&out, req.id, INVALID_PARAMS, format!("{e}"))?;
+                    }
+                }
             }
 
             method::MKDIR => {
