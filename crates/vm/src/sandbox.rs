@@ -377,6 +377,19 @@ impl Sandbox {
         Ok(exit_code)
     }
 
+    /// Block until the guest's vsock server answers, and give up saying so if
+    /// it never does.
+    ///
+    /// `start` returns when the VMM is running, which is earlier than the
+    /// guest is reachable — kernel and guest init still have to happen. A
+    /// caller that announces readiness at `start` hands its own caller a race
+    /// it cannot see: the first request pays the whole wait, and on a loaded
+    /// host pays past the connect budget and fails. Waiting here moves that
+    /// wait to where it can be named.
+    pub fn reach(&self) -> Result<()> {
+        self.connect_vsock().map(drop)
+    }
+
     /// Ask the guest's platform for a report over `bind`.
     ///
     /// The 64 bytes are what a verifier will check the report's caller field

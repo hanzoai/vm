@@ -381,6 +381,12 @@ pub(crate) fn run_stdio(prepared: &PreparedVm, launch: &vm_measure::Log) -> Resu
         },
     )?;
 
+    // `ready` says the guest answers, not that the VMM started. The two are
+    // the same on an idle host and seconds apart on a busy one, and a driver
+    // that believed the second spent its first request's whole connect budget
+    // discovering the difference.
+    sandbox.reach()?;
+
     // Send ready notification
     send_json_shared(
         &out,
