@@ -1,6 +1,6 @@
 [package]
 name = "vm-core"
-version = "2.0.1"
+version = "2.0.2"
 edition = "2021"
 description = "Hanzo microVM: boot, exec, mounts, ports, checkpoints"
 license = "Apache-2.0"
@@ -10,8 +10,8 @@ repository = "https://github.com/hanzoai/vm"
 name = "vm"
 
 [dependencies]
-vm-proto = { version = "2.0.1", path = "../vm-proto" }
-vm-measure = { version = "2.0.1", path = "../vm-measure" }
+vm-proto = { version = "2.0.2", path = "../vm-proto" }
+vm-measure = { version = "2.0.2", path = "../vm-measure" }
 anyhow = "1"
 crossbeam-channel = "0.5"
 serde = { version = "1", features = ["derive"] }
@@ -22,8 +22,8 @@ socket2 = "0.5"
 [target.'cfg(target_os = "linux")'.dependencies]
 libc = "0.2"
 [target.'cfg(target_os = "macos")'.dependencies]
-vm-darwin = { version = "2.0.1", path = "../vm-darwin" }
+vm-darwin = { version = "2.0.2", path = "../vm-darwin" }
 [target.'cfg(all(target_os = "linux", target_arch = "aarch64"))'.dependencies]
-vm-linux = { version = "2.0.1", path = "../vm-linux" }
+vm-linux = { version = "2.0.2", path = "../vm-linux" }
 [target.'cfg(all(target_os = "linux", target_arch = "x86_64"))'.dependencies]
-vm-ch = { version = "2.0.1", path = "../vm-ch" }
+vm-ch = { version = "2.0.2", path = "../vm-ch" }

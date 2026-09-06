@@ -1,6 +1,6 @@
 {
   "name": "@hanzo/vm",
-  "version": "2.0.1",
+  "version": "2.0.2",
   "type": "module",
   "main": "src/index.ts",
   "types": "src/index.ts",
