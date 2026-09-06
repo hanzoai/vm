@@ -20,6 +20,29 @@ use vm_proto::{
     WatchRequest, WriteFileRequest, WriteFileResponse, VSOCK_PORT, VSOCK_PORT_FORWARD,
 };
 
+/// What the kernel is told at boot, and the only place it is decided.
+///
+/// mitigations=off: the guest is disposable and holds no secrets (the proxy
+/// substitutes secret placeholders host-side), so CPU vulnerability
+/// mitigations inside it buy nothing and cost cycles. A console is only named
+/// when something reads it — registering one costs the kernel a device probe
+/// plus the log replay, and a plain exec run has nowhere to show it (dmesg
+/// still works).
+///
+/// It is a function, not a literal inside the builder, because the command
+/// line is part of what a guest IS: a measurement has to state the same string
+/// the hypervisor is handed, and two spellings of it would be two guests.
+pub fn command_line(verbose: bool, console: bool) -> String {
+    let base = "root=/dev/vda rw init=/usr/bin/vm-guest mitigations=off printk.time=1";
+    if verbose {
+        format!("console={} {}", CONSOLE_DEVICE, base)
+    } else if console {
+        format!("console={} {} quiet", CONSOLE_DEVICE, base)
+    } else {
+        format!("{} quiet", base)
+    }
+}
+
 // --- Mount types ---
 
 #[derive(Debug, Clone)]
@@ -142,21 +165,7 @@ impl VmConfigBuilder {
             boot_loader.set_initrd(initrd);
         }
 
-        // mitigations=off: the guest is disposable and holds no secrets
-        // (the proxy substitutes secret placeholders host-side), so CPU
-        // vulnerability mitigations inside it buy nothing and cost cycles.
-        // A console is only named when something reads it — registering
-        // one costs the kernel a device probe plus the log replay, and a
-        // plain exec run has nowhere to show it (dmesg still works).
-        let base = "root=/dev/vda rw init=/usr/bin/vm-guest mitigations=off printk.time=1";
-        let cmdline = if self.verbose {
-            format!("console={} {}", CONSOLE_DEVICE, base)
-        } else if self.console {
-            format!("console={} {} quiet", CONSOLE_DEVICE, base)
-        } else {
-            format!("{} quiet", base)
-        };
-        boot_loader.set_command_line(&cmdline);
+        boot_loader.set_command_line(&command_line(self.verbose, self.console));
 
         let memory_bytes = self.memory_mb * 1024 * 1024;
         let config = VirtualMachineConfiguration::new(&boot_loader, self.cpus, memory_bytes);
@@ -366,6 +375,35 @@ impl Sandbox {
         }
 
         Ok(exit_code)
+    }
+
+    /// Ask the guest's platform for a report over `bind`.
+    ///
+    /// The 64 bytes are what a verifier will check the report's caller field
+    /// against — [`Measurement::bind`](vm_measure::Measurement::bind). A guest
+    /// on ordinary hardware answers `none`, which is an answer: nothing here
+    /// will sign for a measurement.
+    ///
+    /// The read is bounded because a guest that predates this request drops
+    /// the frame in silence, and a caller must not wait out a vm's whole life
+    /// on a question it was never able to hear.
+    pub fn attest(&self, bind: &[u8; 64]) -> Result<vm_measure::attest::Status> {
+        let stream = self.connect_vsock()?;
+        let mut writer = stream.try_clone()?;
+        let mut reader = stream;
+        reader.set_read_timeout(Some(Duration::from_secs(5)))?;
+
+        self.send_mount_requests(&mut writer, &mut reader)?;
+
+        frame::write_frame(&mut writer, frame::ATTEST_REQ, bind)?;
+        match frame::read_frame(&mut reader).context("reading attest response")? {
+            Some((frame::ATTEST_RESP, payload)) => {
+                serde_json::from_slice(&payload).context("reading the guest's attestation status")
+            }
+            Some((frame::ERROR, payload)) => bail!("{}", String::from_utf8_lossy(&payload)),
+            Some((other, _)) => bail!("unexpected frame type 0x{other:02x} in attest response"),
+            None => bail!("guest closed connection during attest"),
+        }
     }
 
     pub fn read_file(&self, path: &str) -> Result<Vec<u8>> {

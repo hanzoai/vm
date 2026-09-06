@@ -7,7 +7,7 @@ mod sandbox;
 #[cfg(target_os = "linux")]
 pub use clone::{clone_file, reflink_file};
 
-pub use sandbox::{MountConfig, PortForwardHandle, Sandbox, VmConfigBuilder};
+pub use sandbox::{command_line, MountConfig, PortForwardHandle, Sandbox, VmConfigBuilder};
 pub use vm_proto::{
     frame, ExecRequest, ForwardRequest, ForwardResponse, MountRequest, MountResponse, PortMapping,
     ReadFileRequest, WriteFileRequest, WriteFileResponse, VSOCK_PORT, VSOCK_PORT_FORWARD,

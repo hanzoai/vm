@@ -173,6 +173,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "block-buffer"
+version = "0.10.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3078c7629b62d3f0439517fa394996acacc5cbc91c5a20d8c658e77abd503a71"
+dependencies = [
+ "generic-array",
+]
+
+[[package]]
 name = "block2"
 version = "0.6.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -429,6 +438,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d0a5c400df2834b80a4c3327b3aad3a4c4cd4de0629063962b03235697506a28"
 
 [[package]]
+name = "crypto-common"
+version = "0.1.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "78c8292055d1c1df0cce5d180393dc8cce0abec0a7102adb6c7b1eef6016d60a"
+dependencies = [
+ "generic-array",
+ "typenum",
+]
+
+[[package]]
 name = "defmt"
 version = "0.3.100"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -476,6 +495,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2163a0e204a148662b6b6816d4b5d5668a5f2f8df498ccbd5cd0e864e78fecba"
 dependencies = [
  "powerfmt",
+]
+
+[[package]]
+name = "digest"
+version = "0.10.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9ed9a281f7bc9b7576e61468ba615a66a5c8cfdff42420a70aa82701a3b1e292"
+dependencies = [
+ "block-buffer",
+ "crypto-common",
 ]
 
 [[package]]
@@ -639,6 +668,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "generic-array"
+version = "0.14.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "85649ca51fd72272d7821adaf274ad91c288277713d9c18820d8499a7ff69e9a"
+dependencies = [
+ "typenum",
+ "version_check",
+]
+
+[[package]]
 name = "getrandom"
 version = "0.2.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -694,7 +733,7 @@ dependencies = [
 
 [[package]]
 name = "hanzo-vm"
-version = "2.0.0"
+version = "2.0.1"
 dependencies = [
  "anyhow",
  "base64",
@@ -710,6 +749,7 @@ dependencies = [
  "tracing-subscriber",
  "ureq",
  "vm-core",
+ "vm-measure",
  "vm-proto",
  "vm-proxy",
  "vm-store",
@@ -1553,6 +1593,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "sha2"
+version = "0.10.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a7507d819769d01a365ab707794a4084392c824f54a7a6a7862f8c3d0892b283"
+dependencies = [
+ "cfg-if",
+ "cpufeatures 0.2.17",
+ "digest",
+]
+
+[[package]]
 name = "sharded-slab"
 version = "0.1.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1690,7 +1741,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
 dependencies = [
  "fastrand",
- "getrandom 0.3.4",
+ "getrandom 0.4.3",
  "once_cell",
  "rustix",
  "windows-sys 0.61.2",
@@ -1896,6 +1947,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "typenum"
+version = "1.20.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b6f5e870be6c3b371b77fe0ee0bafb859fa4964b4404c27de1d380043c4dda20"
+
+[[package]]
 name = "unicode-ident"
 version = "1.0.24"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2040,7 +2097,7 @@ dependencies = [
 
 [[package]]
 name = "vm-ch"
-version = "2.0.0"
+version = "2.0.1"
 dependencies = [
  "crossbeam-channel",
  "libc",
@@ -2055,7 +2112,7 @@ dependencies = [
 
 [[package]]
 name = "vm-core"
-version = "2.0.0"
+version = "2.0.1"
 dependencies = [
  "anyhow",
  "crossbeam-channel",
@@ -2067,12 +2124,13 @@ dependencies = [
  "vm-ch",
  "vm-darwin",
  "vm-linux",
+ "vm-measure",
  "vm-proto",
 ]
 
 [[package]]
 name = "vm-darwin"
-version = "2.0.0"
+version = "2.0.1"
 dependencies = [
  "block2",
  "crossbeam-channel",
@@ -2091,7 +2149,7 @@ checksum = "7e21282841a059bb62627ce8441c491f09603622cd5a21c43bfedc85a2952f23"
 
 [[package]]
 name = "vm-guest"
-version = "2.0.0"
+version = "2.0.1"
 dependencies = [
  "flate2",
  "ignore",
@@ -2100,12 +2158,13 @@ dependencies = [
  "serde_json",
  "tar",
  "ureq",
+ "vm-measure",
  "vm-proto",
 ]
 
 [[package]]
 name = "vm-linux"
-version = "2.0.0"
+version = "2.0.1"
 dependencies = [
  "crossbeam-channel",
  "kvm-bindings",
@@ -2115,6 +2174,18 @@ dependencies = [
  "vm-fdt",
  "vm-memory 0.15.0",
  "vmm-sys-util 0.12.1",
+]
+
+[[package]]
+name = "vm-measure"
+version = "2.0.1"
+dependencies = [
+ "anyhow",
+ "libc",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tempfile",
 ]
 
 [[package]]
@@ -2142,7 +2213,7 @@ dependencies = [
 
 [[package]]
 name = "vm-proto"
-version = "2.0.0"
+version = "2.0.1"
 dependencies = [
  "serde",
  "serde_json",
@@ -2150,7 +2221,7 @@ dependencies = [
 
 [[package]]
 name = "vm-proxy"
-version = "2.0.0"
+version = "2.0.1"
 dependencies = [
  "anyhow",
  "boring",
@@ -2173,7 +2244,7 @@ dependencies = [
 
 [[package]]
 name = "vm-sdk"
-version = "2.0.0"
+version = "2.0.1"
 dependencies = [
  "anyhow",
  "blake3",
@@ -2188,7 +2259,7 @@ dependencies = [
 
 [[package]]
 name = "vm-store"
-version = "2.0.0"
+version = "2.0.1"
 dependencies = [
  "anyhow",
  "blake3",
