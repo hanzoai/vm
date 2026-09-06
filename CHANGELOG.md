@@ -28,6 +28,17 @@ that number is the one a confidential-computing platform would sign for.
 - `boot::plan` separates resolving a launch from performing one; a
   measurement is over the source images, taken before anything is cloned.
 
+Two things found while proving the above on a loaded host:
+
+- `run --stdio` says `ready` when the GUEST answers, not when the VMM
+  started. The two are the same on an idle machine and seconds apart on a
+  busy one, and a driver that believed the second spent its first request's
+  whole connect budget discovering the difference — 10 s, then a failure.
+- The guest mounts `/dev/shm`. Every Linux system has one, and containerd
+  bind-mounts the host's into any pod sharing the host IPC namespace: with
+  nothing there it refuses to start the sandbox at all, so `kubectl debug
+  node/…` and every hostIPC pod failed on a k3s running in the guest.
+
 ## 2.0.0
 
 `cargo install hanzo-vm` now installs this CLI. The `hanzo-vm` name on

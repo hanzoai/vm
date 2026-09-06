@@ -103,6 +103,18 @@ mod guest {
             Some("newinstance,ptmxmode=0666"),
         );
         mount_fs("tmpfs", "/tmp", "tmpfs", None);
+        // POSIX shared memory. Every Linux system has one and a container
+        // runtime expects it: containerd bind-mounts the host's /dev/shm into
+        // any pod that shares the host IPC namespace, and refuses to start the
+        // sandbox at all when there is nothing there to bind.
+        std::fs::create_dir_all("/dev/shm").ok();
+        mount_fs_with_flags(
+            "tmpfs",
+            "/dev/shm",
+            "tmpfs",
+            libc::MS_NOSUID | libc::MS_NODEV,
+            Some("mode=1777"),
+        );
         mount_fs("cgroup2", "/sys/fs/cgroup", "cgroup2", None);
     }
 
