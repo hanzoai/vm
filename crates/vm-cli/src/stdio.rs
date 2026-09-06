@@ -385,7 +385,7 @@ pub(crate) fn run_stdio(prepared: &PreparedVm, launch: &vm_measure::Log) -> Resu
     // the same on an idle host and seconds apart on a busy one, and a driver
     // that believed the second spent its first request's whole connect budget
     // discovering the difference.
-    sandbox.reach()?;
+    sandbox.wait_ready()?;
 
     // Send ready notification
     send_json_shared(
@@ -399,12 +399,11 @@ pub(crate) fn run_stdio(prepared: &PreparedVm, launch: &vm_measure::Log) -> Resu
 
     let mut pid_counter: u64 = 0;
     let mut processes: HashMap<String, ProcessHandle> = HashMap::new();
-    let mut bg_threads: Vec<std::thread::JoinHandle<()>> = Vec::new();
 
     // Spawn a thread to drain events and write notifications to stdout.
     // This ensures we never block the main stdin-reading loop.
     let out_for_events = out.clone();
-    let event_thread = std::thread::spawn(move || {
+    let _event_thread = std::thread::spawn(move || {
         for event in event_rx {
             let res = match event {
                 Event::Output { pid, stream, data } => send_json_shared(
@@ -516,7 +515,7 @@ pub(crate) fn run_stdio(prepared: &PreparedVm, launch: &vm_measure::Log) -> Resu
                 let mut spawn_env = secret_env.clone();
                 spawn_env.extend(params.env);
 
-                bg_threads.push(std::thread::spawn(move || {
+                std::thread::spawn(move || {
                     let argv: Vec<&str> = params.argv.iter().map(|s| s.as_str()).collect();
                     let stream = match sb.open_exec(&argv, &spawn_env, params.cwd.as_deref()) {
                         Ok(s) => s,
@@ -608,7 +607,7 @@ pub(crate) fn run_stdio(prepared: &PreparedVm, launch: &vm_measure::Log) -> Resu
                     }
 
                     let _ = input_thread.join();
-                }));
+                });
 
                 send_result_shared(&out, req.id, SpawnResultPayload { pid })?;
             }
@@ -664,7 +663,7 @@ pub(crate) fn run_stdio(prepared: &PreparedVm, launch: &vm_measure::Log) -> Resu
                 let path = params.path.clone();
                 let recursive = params.recursive;
 
-                bg_threads.push(std::thread::spawn(move || {
+                std::thread::spawn(move || {
                     let stream = match sb.open_watch(&path, recursive) {
                         Ok(s) => s,
                         Err(e) => {
@@ -682,7 +681,7 @@ pub(crate) fn run_stdio(prepared: &PreparedVm, launch: &vm_measure::Log) -> Resu
                             });
                         }
                     }
-                }));
+                });
 
                 send_result_shared(&out, req.id, EmptyResult {})?;
             }
@@ -733,10 +732,7 @@ pub(crate) fn run_stdio(prepared: &PreparedVm, launch: &vm_measure::Log) -> Resu
                     }
                 };
                 handle_checkpoint(&sandbox, prepared, req.id, &params.name, &out)?;
-                let _ = sandbox.stop();
-                drop(event_tx);
-                let _ = event_thread.join();
-                return Ok(0);
+                return Ok(stop(&sandbox, event_tx));
             }
 
             // What the guest's platform will sign for. The bind covers the
@@ -925,18 +921,21 @@ pub(crate) fn run_stdio(prepared: &PreparedVm, launch: &vm_measure::Log) -> Resu
         }
     }
 
-    // Stop the VM first — this closes vsock connections, unblocking
-    // any background threads stuck on read_frame().
+    Ok(stop(&sandbox, event_tx))
+}
+
+/// Stop the vm and go.
+///
+/// The threads narrating a spawned process are parked on vsock reads, and
+/// stopping the vm does not reliably wake every one of them. Waiting for them
+/// is how a vm outlived the supervisor that had already let go of it: the
+/// process sat in a join for as long as the machine was up, still holding the
+/// forwarded ports, so the next `hanzo up` could not bind them. There is also
+/// nobody left to narrate to — EOF on stdin IS the driver leaving.
+fn stop(sandbox: &Sandbox, event_tx: std::sync::mpsc::Sender<Event>) -> i32 {
     let _ = sandbox.stop();
-
-    // Wait briefly for background threads to notice and exit
-    for thread in bg_threads {
-        let _ = thread.join();
-    }
-
     drop(event_tx);
-    let _ = event_thread.join();
-    Ok(0)
+    0
 }
 
 fn handle_exec(

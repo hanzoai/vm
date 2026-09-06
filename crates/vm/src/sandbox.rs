@@ -275,10 +275,14 @@ impl Sandbox {
     }
 
     /// Block until the guest control server accepts vsock connections.
+    /// Block until the guest's vsock server answers.
+    ///
+    /// `start` returns when the VMM is running, which is earlier than the
+    /// guest is reachable — kernel and guest init still have to happen. A
+    /// caller that announces readiness at `start` hands its own caller a race
+    /// it cannot see, and the first request pays the whole wait.
     pub fn wait_ready(&self) -> Result<()> {
-        let stream = self.connect_vsock()?;
-        drop(stream);
-        Ok(())
+        self.connect_vsock().map(drop)
     }
 
     pub fn state_channel(&self) -> Receiver<VmState> {
@@ -375,19 +379,6 @@ impl Sandbox {
         }
 
         Ok(exit_code)
-    }
-
-    /// Block until the guest's vsock server answers, and give up saying so if
-    /// it never does.
-    ///
-    /// `start` returns when the VMM is running, which is earlier than the
-    /// guest is reachable — kernel and guest init still have to happen. A
-    /// caller that announces readiness at `start` hands its own caller a race
-    /// it cannot see: the first request pays the whole wait, and on a loaded
-    /// host pays past the connect budget and fails. Waiting here moves that
-    /// wait to where it can be named.
-    pub fn reach(&self) -> Result<()> {
-        self.connect_vsock().map(drop)
     }
 
     /// Ask the guest's platform for a report over `bind`.
@@ -954,9 +945,23 @@ impl Sandbox {
         open_forward_stream(&self.vm, guest_port)
     }
 
+    /// How long a guest gets to answer its first connection.
+    ///
+    /// It is a WALL CLOCK, not a count of attempts. The budget used to be a
+    /// thousand tries — a hundred at 1 ms then nine hundred at 10 ms, so about
+    /// nine seconds — and a guest boots in a quarter of one on an idle
+    /// machine. On a machine under real load it does not: at a load average
+    /// past a hundred, the same guest took longer than the budget, and the
+    /// error blamed the refusal that was still being retried rather than the
+    /// wait that ran out. A minute is past the point where waiting longer
+    /// tells anyone anything.
+    const REACHABLE: Duration = Duration::from_secs(60);
+
     fn connect_vsock(&self) -> Result<TcpStream> {
         let state_rx = self.vm.state_channel();
-        for attempt in 1..=1000 {
+        let start = std::time::Instant::now();
+        let mut last;
+        loop {
             // Check if VM died (e.g. guest mount failure -> reboot POWER_OFF)
             if let Ok(state) = state_rx.try_recv() {
                 match state {
@@ -972,23 +977,25 @@ impl Sandbox {
                     let _ = s.set_nodelay(true);
                     return Ok(s);
                 }
-                Err(e) => {
-                    if attempt == 1000 {
-                        bail!(
-                            "Failed to connect to guest after {} attempts: {}",
-                            attempt,
-                            e
-                        );
-                    }
-                    tracing::debug!("vsock connect attempt {} failed: {}", attempt, e);
-                    // Fine-grained polling while the guest is expected any
-                    // millisecond now; back off once it is clearly slow.
-                    let interval = if attempt < 100 { 1 } else { 10 };
-                    std::thread::sleep(Duration::from_millis(interval));
-                }
+                Err(e) => last = e,
             }
+            let waited = start.elapsed();
+            if waited >= Self::REACHABLE {
+                bail!(
+                    "guest did not answer in {}s (last: {last})",
+                    Self::REACHABLE.as_secs()
+                );
+            }
+            tracing::debug!("vsock connect failed after {waited:?}: {last}");
+            // Fine-grained polling while the guest is expected any millisecond
+            // now; back off once it is clearly slow.
+            let interval = if waited < Duration::from_millis(100) {
+                1
+            } else {
+                10
+            };
+            std::thread::sleep(Duration::from_millis(interval));
         }
-        unreachable!()
     }
 }
 
