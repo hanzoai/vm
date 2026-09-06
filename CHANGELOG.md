@@ -1,5 +1,24 @@
 # Changelog
 
+## 2.0.2
+
+Two things 2.0.1 got wrong, found within the hour of publishing it by running
+`hanzo up` against a real cluster on a loaded machine.
+
+- The first connection to a guest is bounded by a minute of WALL CLOCK, not by
+  a thousand attempts (about nine seconds). A guest boots in a quarter of a
+  second on an idle machine and takes longer than nine on one at a load average
+  past a hundred, where the error then blamed the refusal it was still retrying
+  rather than the wait that had run out.
+- `run --stdio` stops when its stdin closes, instead of parking in a join. The
+  threads narrating a spawned process sit on vsock reads that stopping the vm
+  does not reliably wake, so a vm outlived the supervisor that had already let
+  go of it — still holding the forwarded ports, so the next `hanzo up` could
+  not bind them. EOF on stdin is the driver leaving; there is nobody left to
+  narrate to.
+
+`Sandbox::reach`, added in 2.0.1, is gone: `wait_ready` already was it.
+
 ## 2.0.1
 
 Measured boot. A launch can now be stated as a number before it happens, and

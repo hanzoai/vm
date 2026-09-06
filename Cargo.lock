@@ -733,7 +733,7 @@ dependencies = [
 
 [[package]]
 name = "hanzo-vm"
-version = "2.0.1"
+version = "2.0.2"
 dependencies = [
  "anyhow",
  "base64",
@@ -2097,7 +2097,7 @@ dependencies = [
 
 [[package]]
 name = "vm-ch"
-version = "2.0.1"
+version = "2.0.2"
 dependencies = [
  "crossbeam-channel",
  "libc",
@@ -2112,7 +2112,7 @@ dependencies = [
 
 [[package]]
 name = "vm-core"
-version = "2.0.1"
+version = "2.0.2"
 dependencies = [
  "anyhow",
  "crossbeam-channel",
@@ -2130,7 +2130,7 @@ dependencies = [
 
 [[package]]
 name = "vm-darwin"
-version = "2.0.1"
+version = "2.0.2"
 dependencies = [
  "block2",
  "crossbeam-channel",
@@ -2149,7 +2149,7 @@ checksum = "7e21282841a059bb62627ce8441c491f09603622cd5a21c43bfedc85a2952f23"
 
 [[package]]
 name = "vm-guest"
-version = "2.0.1"
+version = "2.0.2"
 dependencies = [
  "flate2",
  "ignore",
@@ -2164,7 +2164,7 @@ dependencies = [
 
 [[package]]
 name = "vm-linux"
-version = "2.0.1"
+version = "2.0.2"
 dependencies = [
  "crossbeam-channel",
  "kvm-bindings",
@@ -2178,7 +2178,7 @@ dependencies = [
 
 [[package]]
 name = "vm-measure"
-version = "2.0.1"
+version = "2.0.2"
 dependencies = [
  "anyhow",
  "libc",
@@ -2213,7 +2213,7 @@ dependencies = [
 
 [[package]]
 name = "vm-proto"
-version = "2.0.1"
+version = "2.0.2"
 dependencies = [
  "serde",
  "serde_json",
@@ -2221,7 +2221,7 @@ dependencies = [
 
 [[package]]
 name = "vm-proxy"
-version = "2.0.1"
+version = "2.0.2"
 dependencies = [
  "anyhow",
  "boring",
@@ -2244,7 +2244,7 @@ dependencies = [
 
 [[package]]
 name = "vm-sdk"
-version = "2.0.1"
+version = "2.0.2"
 dependencies = [
  "anyhow",
  "blake3",
@@ -2259,7 +2259,7 @@ dependencies = [
 
 [[package]]
 name = "vm-store"
-version = "2.0.1"
+version = "2.0.2"
 dependencies = [
  "anyhow",
  "blake3",
