@@ -1,9 +1,11 @@
 mod backend;
 pub mod cas;
+mod s3;
 mod nbd;
 
 pub use backend::FlatFileBackend;
 pub use cas::{CasBackend, ChunkIndex, ChunkStore, LocalChunkStore};
+pub use s3::{S3ChunkStore, S3Config, Tiered};
 pub use nbd::NbdBackend;
 
 use std::os::unix::net::UnixListener;
@@ -134,7 +136,17 @@ pub fn start_cas_nbd_server(
     socket_path: &str,
     disk_size: u64,
 ) -> Result<NbdHandle> {
-    let store: Box<dyn ChunkStore> = Box::new(LocalChunkStore::open(cas_dir)?);
+    // Local always. An archive in front of it only when this host has one
+    // configured — a vm that never archives must not fail to start because
+    // nobody set an endpoint, and a chunk is content-addressed either way.
+    let local = Box::new(LocalChunkStore::open(cas_dir)?);
+    let store: Box<dyn ChunkStore> = match S3ChunkStore::from_env() {
+        Some(remote) => {
+            info!("chunk archive configured; local cache in front of it");
+            Box::new(Tiered::new(local, Box::new(remote)))
+        }
+        None => local,
+    };
 
     let (index, fallback, source_idx) = if Path::new(index_path).exists() {
         info!("loading CAS index from {}", index_path);

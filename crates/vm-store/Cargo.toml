@@ -15,3 +15,6 @@ anyhow = "1"
 tracing = "0.1"
 libc = "0.2"
 blake3 = "1"
+ureq = { version = "3", default-features = false, features = ["rustls"] }
+sha2 = "0.10"
+hmac = "0.12"
