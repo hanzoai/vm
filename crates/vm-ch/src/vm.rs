@@ -27,8 +27,13 @@ const GUEST_CID: u32 = 3;
 pub enum VmState {
     Stopped = 0,
     Running = 1,
+    // 2 is Apple's VZVirtualMachineStatePaused, and this backend now reaches
+    // that state too — cloud-hypervisor's vm.pause stops the vCPUs while the
+    // memory stays mapped. The discriminants stay aligned so one state channel
+    // means the same thing on both backends.
+    Paused = 2,
     Error = 3,
-    // Paused/Starting/etc. kept as discriminants for Darwin compatibility.
+    // Starting/Pausing/Resuming/Stopping (4..7) are Darwin-only today.
     Unknown = -1,
 }
 
@@ -337,11 +342,65 @@ impl VirtualMachine {
         self.running.load(Ordering::Acquire)
     }
 
+    /// Stop the guest's vCPUs without tearing the machine down.
+    ///
+    /// The memory stays mapped and the devices stay configured, so a resume is
+    /// the guest continuing rather than the guest booting. This is the half of
+    /// suspend that costs nothing: nothing is written and nothing is freed.
+    pub fn pause(&self) -> Result<()> {
+        api::put(&self.api_socket, "vm.pause", None)?;
+        let _ = self.state_tx.try_send(VmState::Paused);
+        Ok(())
+    }
+
+    pub fn resume(&self) -> Result<()> {
+        api::put(&self.api_socket, "vm.resume", None)?;
+        let _ = self.state_tx.try_send(VmState::Running);
+        Ok(())
+    }
+
+    /// Write the paused guest — memory, device state, the lot — under `dir`.
+    ///
+    /// PAUSE FIRST IS NOT AN OPTIMISATION. cloud-hypervisor refuses a snapshot
+    /// of a running VM, because a snapshot taken while vCPUs are executing is a
+    /// torn one: memory would be captured at one instant and device state at
+    /// another, and the restored guest would resume into a machine that never
+    /// existed. So this pauses, snapshots, and leaves it paused — the caller
+    /// decides whether that VM continues or goes away, and either is correct.
+    pub fn snapshot(&self, dir: &Path) -> Result<()> {
+        std::fs::create_dir_all(dir)
+            .map_err(|e| VzError::new(format!("snapshot dir {}: {}", dir.display(), e)))?;
+        self.pause()?;
+        api::put(
+            &self.api_socket,
+            "vm.snapshot",
+            Some(&serde_json::json!({ "destination_url": format!("file://{}", dir.display()) }).to_string()),
+        )
+    }
+
+    /// Bring a guest back from `dir` into THIS machine's VMM.
+    ///
+    /// It replaces vm.create/vm.boot rather than following them: a restore
+    /// carries its own configuration, so a VMM that has already created a VM
+    /// has nowhere to put this one. The restored guest arrives paused, which is
+    /// the same state snapshot left it in, so resuming is the caller's move and
+    /// the round trip is symmetric.
+    pub fn restore(&self, dir: &Path) -> Result<()> {
+        api::put(
+            &self.api_socket,
+            "vm.restore",
+            Some(&serde_json::json!({ "source_url": format!("file://{}", dir.display()) }).to_string()),
+        )?;
+        self.running.store(true, Ordering::Release);
+        let _ = self.state_tx.try_send(VmState::Paused);
+        Ok(())
+    }
+
     pub fn can_pause(&self) -> bool {
-        false
+        self.running.load(Ordering::Acquire)
     }
     pub fn can_resume(&self) -> bool {
-        false
+        self.running.load(Ordering::Acquire)
     }
 
     pub fn can_request_stop(&self) -> bool {
