@@ -27,7 +27,7 @@ env:
 
 jobs:
   cli-darwin:
-    runs-on: hanzo-build-macos-arm64
+    runs-on: macos-arm64
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
@@ -45,9 +45,9 @@ jobs:
     strategy:
       matrix:
         include:
-          - runner: hanzo-build-linux-arm64
+          - runner: linux-arm64
             arch: aarch64
-          - runner: hanzo-build-linux-amd64
+          - runner: linux-amd64
             arch: x86_64
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 90
@@ -66,10 +66,10 @@ jobs:
     strategy:
       matrix:
         include:
-          - runner: hanzo-build-linux-arm64
+          - runner: linux-arm64
             arch: aarch64
             target: aarch64-unknown-linux-musl
-          - runner: hanzo-build-linux-amd64
+          - runner: linux-amd64
             arch: x86_64
             target: x86_64-unknown-linux-musl
     runs-on: ${{ matrix.runner }}
