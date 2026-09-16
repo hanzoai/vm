@@ -27,7 +27,7 @@ env:
 
 jobs:
   cli-darwin:
-    runs-on: macos-arm64
+    runs-on: darwin-arm64
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
