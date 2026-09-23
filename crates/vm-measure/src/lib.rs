@@ -437,6 +437,27 @@ fn identity(path: &Path) -> Result<Entry> {
     })
 }
 
+/// Stable std reports no device or inode off unix, so there the identity is
+/// length and modification time. The `hanzo` CLI links this crate on every
+/// target it ships, Windows included.
+#[cfg(not(unix))]
+fn identity(path: &Path) -> Result<Entry> {
+    let meta = std::fs::metadata(path).with_context(|| format!("measuring {}", path.display()))?;
+    let modified = meta
+        .modified()
+        .with_context(|| format!("measuring {}", path.display()))?
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default();
+    Ok(Entry {
+        device: 0,
+        inode: 0,
+        length: meta.len(),
+        modified: modified.as_secs() as i64,
+        modified_nanos: i64::from(modified.subsec_nanos()),
+        digest: Digest::zero(),
+    })
+}
+
 // ---- hex ----------------------------------------------------------------------
 
 fn hex(bytes: &[u8]) -> String {

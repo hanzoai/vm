@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.0.3
+
+`vm-measure` compiles off unix. Its file identity was unix-only, so the `hanzo`
+CLI, which links it on every target it ships, failed to build for Windows from
+the day it took the crate. Off unix the identity is length and modification
+time.
+
 ## 2.0.2
 
 Two things 2.0.1 got wrong, found within the hour of publishing it by running
