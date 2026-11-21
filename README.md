@@ -1,5 +1,7 @@
 # Hanzo VM
 
+[![Open in Hanzo](https://hanzo.app/badges/open-in-hanzo.svg)](https://hanzo.app/dev/open?repo=github.com/hanzoai/vm&ref=main&action=open) [![Edit with Hanzo](https://hanzo.app/badges/edit-with-hanzo.svg)](https://hanzo.app/dev/open?repo=github.com/hanzoai/vm&ref=main&action=edit)
+
 Hanzo's microVM layer. `hanzo-vm` boots a small Linux guest on the host you are
 on, runs a command in it, and throws the disk away when the command exits. The
 guest gets a copy-on-write clone of the root image, so packages installed and
