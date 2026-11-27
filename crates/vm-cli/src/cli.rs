@@ -1,6 +1,9 @@
 use std::net::Ipv4Addr;
+use std::path::PathBuf;
 
 use clap::Parser;
+
+use crate::resize::parse_size_mb;
 
 #[derive(clap::Args)]
 pub(crate) struct VmArgs {
@@ -8,12 +11,12 @@ pub(crate) struct VmArgs {
     #[arg(long)]
     pub cpus: Option<usize>,
 
-    /// Memory in MB
-    #[arg(long)]
+    /// Memory size (e.g. 8GiB, 4096MiB, or plain MiB integer 4096)
+    #[arg(long, value_parser = parse_size_mb)]
     pub memory: Option<u64>,
 
-    /// Disk size in MB (default: 4096)
-    #[arg(long)]
+    /// Disk size (e.g. 32GiB, 8192MiB, or plain MiB integer; default: 4096)
+    #[arg(long, alias = "disk", value_parser = parse_size_mb)]
     pub disk_size: Option<u64>,
 
     /// Path to kernel
@@ -131,6 +134,21 @@ pub(crate) enum Commands {
         action: CheckpointCommands,
     },
 
+    /// Resize a raw ext4 disk image or checkpoint offline
+    Resize {
+        /// Checkpoint name under `~/.hanzo/vm/checkpoints/<name>.ext4`
+        #[arg(long, conflicts_with = "image")]
+        checkpoint: Option<String>,
+
+        /// Explicit path to a raw `.ext4` disk image (defaults to base `rootfs.ext4`)
+        #[arg(long, conflicts_with = "checkpoint")]
+        image: Option<PathBuf>,
+
+        /// Target disk size (e.g. 32GiB, 16GiB, or plain MiB integer)
+        #[arg(long = "disk", visible_alias = "disk-size", alias = "size", value_parser = parse_size_mb)]
+        disk_mb: u64,
+    },
+
     /// Remove leftover instance data from crashed VMs
     Prune,
 }
@@ -175,4 +193,60 @@ pub(crate) enum CheckpointCommands {
         /// Checkpoint name
         name: String,
     },
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use clap::CommandFactory;
+
+    #[test]
+    fn cli_command_tree_is_valid_and_parses_units_and_resize() {
+        Cli::command().debug_assert();
+
+        let run = Cli::try_parse_from([
+            "hanzo-vm",
+            "run",
+            "--cpus",
+            "8",
+            "--memory",
+            "8GiB",
+            "--disk",
+            "32GiB",
+            "uname",
+            "-a",
+        ])
+        .expect("run with human units parses");
+        match run.command {
+            Commands::Run { vm, command, .. } => {
+                assert_eq!(vm.cpus, Some(8));
+                assert_eq!(vm.memory, Some(8192));
+                assert_eq!(vm.disk_size, Some(32768));
+                assert_eq!(command, ["uname", "-a"]);
+            }
+            _ => panic!("expected Run"),
+        }
+
+        let resize = Cli::try_parse_from([
+            "hanzo-vm",
+            "resize",
+            "--checkpoint",
+            "k3s",
+            "--disk",
+            "64GiB",
+        ])
+        .expect("resize parses");
+        match resize.command {
+            Commands::Resize {
+                checkpoint,
+                image,
+                disk_mb,
+            } => {
+                assert_eq!(checkpoint.as_deref(), Some("k3s"));
+                assert!(image.is_none());
+                assert_eq!(disk_mb, 65536);
+            }
+            _ => panic!("expected Resize"),
+        }
+    }
 }

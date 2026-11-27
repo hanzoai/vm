@@ -4,6 +4,7 @@ mod checkpoint;
 mod cli;
 mod config;
 mod measure;
+mod resize;
 mod stdio;
 
 use std::process;
@@ -172,6 +173,13 @@ fn main() -> Result<()> {
                 anyhow::bail!("checkpoint pull is not yet implemented")
             }
         },
+        Commands::Resize {
+            checkpoint,
+            image,
+            disk_mb,
+        } => {
+            resize::run(checkpoint.as_deref(), image.as_deref(), disk_mb)?;
+        }
     }
 
     Ok(())
